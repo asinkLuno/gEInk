@@ -7,9 +7,48 @@
 4. Resize到480*800或800*480
 """
 
+import os
 import sys
+from pathlib import Path
+from typing import List
 
 from PIL import Image
+
+# 支持的图片格式
+SUPPORTED_FORMATS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
+
+
+def get_image_files(path: str) -> List[str]:
+    """获取路径下的所有图片文件"""
+    p = Path(path)
+    if p.is_file():
+        return [str(p)]
+    elif p.is_dir():
+        return sorted(
+            [str(f) for f in p.iterdir() if f.suffix.lower() in SUPPORTED_FORMATS]
+        )
+    return []
+
+
+def process_directory(input_dir: str):
+    """处理目录下所有图片"""
+    image_files = get_image_files(input_dir)
+    total = len(image_files)
+
+    if total == 0:
+        print(f"在 {input_dir} 中未找到图片文件")
+        return
+
+    print(f"找到 {total} 张图片，开始处理...\n")
+
+    for idx, input_path in enumerate(image_files, 1):
+        filename = os.path.basename(input_path)
+        base, ext = os.path.splitext(filename)
+        output_path = os.path.join(input_dir, f"{base}eink{ext}")
+
+        print(f"[{idx}/{total}] 处理: {filename}")
+        process_image(input_path, output_path)
+        print()
 
 
 def get_background_color(img):
@@ -197,17 +236,14 @@ def process_image(input_path, output_path):
 
 
 if __name__ == "__main__":
-    input_file = (
+    input_path = (
         sys.argv[1] if len(sys.argv) > 1 else "/home/guozr/CODE/gEInk/test_input.webp"
     )
 
-    # 默认输出为输入文件加eink后缀
-    if len(sys.argv) > 2:
-        output_file = sys.argv[2]
+    # 判断是文件还是目录
+    if os.path.isdir(input_path):
+        process_directory(input_path)
     else:
-        import os
-
-        base, ext = os.path.splitext(input_file)
+        base, ext = os.path.splitext(input_path)
         output_file = f"{base}eink{ext}"
-
-    process_image(input_file, output_file)
+        process_image(input_path, output_file)
