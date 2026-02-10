@@ -186,6 +186,7 @@ def pad_to_ratio(img: np.ndarray, target_width, target_height):
 def resize_to_target(img: np.ndarray, target_width, target_height):
     """
     Resize图片到目标尺寸，输入为OpenCV图片。
+    对于纵向图片，先旋转90度变成横向。
     Args:
         img: OpenCV图片 (numpy.ndarray)
         target_width: 目标宽度
@@ -194,18 +195,15 @@ def resize_to_target(img: np.ndarray, target_width, target_height):
         Resize后的OpenCV图片 (numpy.ndarray)
     """
     height, width, _ = img.shape
-    # 根据图像方向决定目标尺寸
-    # 与pad_to_ratio保持一致：width >= height 时视为横向
-    if width >= height:
-        # 横向图像，使用目标尺寸
-        return cv2.resize(
-            img, (target_width, target_height), interpolation=cv2.INTER_LANCZOS4
-        )
-    else:
-        # 纵向图像，交换目标尺寸
-        return cv2.resize(
-            img, (target_height, target_width), interpolation=cv2.INTER_LANCZOS4
-        )
+
+    # 判断是否需要旋转（纵向图片）
+    if height > width:
+        # 纵向图片需要旋转90度，变成横向
+        img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+        height, width = width, height  # 交换尺寸
+
+    # Resize 到目标尺寸
+    return cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_LANCZOS4)
 
 
 def _preprocess_image(
