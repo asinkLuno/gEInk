@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 
 import click
 from loguru import logger
@@ -23,7 +23,7 @@ def process_single_image(input_path, output_path, processor_func):
 
     if processed_img:
         try:
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             processed_img.save(output_path)
             logger.success(f"Saved: {output_path}")
         except Exception as e:
@@ -37,9 +37,7 @@ def process_single_image(input_path, output_path, processor_func):
 def get_image_files(directory):
     """Get all image files in a directory."""
     return [
-        f
-        for f in os.listdir(directory)
-        if os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS
+        f for f in Path(directory).iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS
     ]
 
 
@@ -57,11 +55,14 @@ def preprocess(input_path, output_path):
     """
     Preprocesses an image or all images in a directory.
     """
-    if os.path.isfile(input_path):
-        # Single file mode
-        if output_path is None:
-            base, ext = os.path.splitext(input_path)
-            output_path = f"{base}_eink{ext}"
+    input_path_obj = Path(input_path)
+    if input_path_obj.is_file():
+        # Single file mode: 图片_4.jpg -> 图片_4_crop.jpg
+        output_path = output_path or str(
+            input_path_obj.with_name(
+                f"{input_path_obj.stem}_crop{input_path_obj.suffix}"
+            )
+        )
         processed_img = _preprocess_image(input_path, TARGET_WIDTH, TARGET_HEIGHT)
 
         if processed_img:
@@ -74,23 +75,19 @@ def preprocess(input_path, output_path):
             logger.error("Preprocessing failed.")
 
     else:
-        # Directory mode
-        input_dir = input_path
-        output_dir = output_path or f"{input_path}_eink"
-        os.makedirs(output_dir, exist_ok=True)
+        # Directory mode: output to same directory with _crop suffix
+        input_dir = Path(input_path)
 
         image_files = get_image_files(input_dir)
 
         count = 0
         for img_file in image_files:
-            input_file = os.path.join(input_dir, img_file)
-            base_name = os.path.splitext(img_file)[0]
-            output_file = os.path.join(output_dir, f"{base_name}_eink.png")
+            output_file = img_file.with_name(f"{img_file.stem}_crop{img_file.suffix}")
 
-            if process_single_image(input_file, output_file, _preprocess_image):
+            if process_single_image(str(img_file), str(output_file), _preprocess_image):
                 count += 1
 
-        logger.success(f"Processed {count} images in {input_dir} -> {output_dir}")
+        logger.success(f"Processed {count} images in {input_dir}")
 
 
 @cli.command()
@@ -98,7 +95,7 @@ def preprocess(input_path, output_path):
 @click.argument("output_path", type=click.Path(), required=False)
 def dither(input_path, output_path):
     """
-    Applies dithering to an image or all _eink images in a directory.
+    Applies dithering to an image or all _crop images in a directory.
     """
 
     def dither_processor(img_path):
@@ -112,11 +109,16 @@ def dither(input_path, output_path):
             return None
         return apply_dithering(input_img, "floyd_steinberg", COLOR_LEVELS)
 
-    if os.path.isfile(input_path):
-        # Single file mode
+    input_path_obj = Path(input_path)
+    if input_path_obj.is_file():
+        # Single file mode: 图片_4_crop.jpg -> 图片_4_dithered.jpg
         if output_path is None:
-            base, ext = os.path.splitext(input_path)
-            output_path = f"{base}_eink_dither{ext}"
+            output_path = str(
+                input_path_obj.with_name(
+                    input_path_obj.stem.replace("_crop", "_dithered")
+                    + input_path_obj.suffix
+                )
+            )
         dithered_img = dither_processor(input_path)
 
         if dithered_img:
@@ -129,23 +131,21 @@ def dither(input_path, output_path):
             logger.error("Dithering failed.")
 
     else:
-        # Directory mode
-        input_dir = input_path
-        output_dir = output_path or f"{input_path}_eink_dither"
-        os.makedirs(output_dir, exist_ok=True)
+        # Directory mode: read _crop files, save as _dithered
+        input_dir = Path(input_path)
 
-        eink_files = [f for f in get_image_files(input_dir) if "_eink" in f]
+        crop_files = [f for f in input_dir.iterdir() if "_crop" in f.name]
 
         count = 0
-        for img_file in eink_files:
-            input_file = os.path.join(input_dir, img_file)
-            base_name = os.path.splitext(img_file)[0]
-            output_file = os.path.join(output_dir, f"{base_name}_dither.png")
+        for img_file in crop_files:
+            output_file = img_file.with_name(
+                img_file.stem.replace("_crop", "_dithered") + img_file.suffix
+            )
 
-            if process_single_image(input_file, output_file, dither_processor):
+            if process_single_image(str(img_file), str(output_file), dither_processor):
                 count += 1
 
-        logger.success(f"Dithered {count} images in {input_dir} -> {output_dir}")
+        logger.success(f"Dithered {count} images in {input_dir}")
 
 
 if __name__ == "__main__":
