@@ -1,5 +1,7 @@
 from PIL import Image
 
+from .config import TARGET_HEIGHT, TARGET_WIDTH
+
 
 def get_dominant_background_color(image_gray):
     """
@@ -23,7 +25,9 @@ def get_dominant_background_color(image_gray):
     return 0 if avg_color < 128 else 255  # Return 0 for black, 255 for white
 
 
-def _preprocess_image(input_image_path, target_width, target_height):
+def _preprocess_image(
+    input_image_path, target_width=TARGET_WIDTH, target_height=TARGET_HEIGHT
+):
     """
     Handles image preprocessing:
     1. Opens image and converts to grayscale.
@@ -71,7 +75,7 @@ def _preprocess_image(input_image_path, target_width, target_height):
             f"Rotated image 90 degrees to fit landscape display. New dimensions: {original_width}x{original_height}"
         )
 
-    # Now, fit the (potentially rotated) image into a canvas that will then be resized to 800x480
+    # Now, fit the (potentially rotated) image into a canvas that will then be resized to target_width x target_height
     scale_factor = min(target_width / original_width, target_height / original_height)
     resized_intermediate_width = int(original_width * scale_factor)
     resized_intermediate_height = int(original_height * scale_factor)

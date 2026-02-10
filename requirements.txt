@@ -3,3 +3,4 @@ loguru
 click
 setuptools
 wheel
+python-dotenv

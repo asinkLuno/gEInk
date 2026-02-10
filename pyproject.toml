@@ -21,13 +21,14 @@ dependencies = [
     "loguru",
     "click",
     "numpy",
+    "dotenv (>=0.9.9,<0.10.0)",
 ]
 
 [project.scripts]
-eink-process = "image_processor:eink_process"
+geink = "src.geink:cli"
 
-[tool.setuptools]
-py-modules = ["image_processor"]
+[tool.setuptools.packages.find]
+where = ["."]
 
 [dependency-groups]
 dev = [
