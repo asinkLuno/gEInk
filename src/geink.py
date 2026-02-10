@@ -78,7 +78,11 @@ def preprocess(input_path, output_path):
     else:
         input_dir = Path(input_path)
 
-        image_files = get_image_files(input_dir)
+        image_files = [
+            f
+            for f in get_image_files(input_dir)
+            if "_crop" not in f.name and "_dithered" not in f.name
+        ]
 
         count = 0
         for img_file in image_files:

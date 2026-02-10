@@ -45,3 +45,39 @@ def test_preprocess_and_dither(test_images):
     # Check _dithered files generated
     dithered_files = list(test_images.glob("*_dithered.jpg"))
     assert len(dithered_files) > 0, "No _dithered files generated"
+
+
+def test_preprocess_skips_processed_files(test_images):
+    """Verify preprocess skips _crop and _dithered files."""
+    # Ensure we have some _crop and _dithered files
+    crop_count = len(list(test_images.glob("*_crop.jpg")))
+    dithered_count = len(list(test_images.glob("*_dithered.jpg")))
+
+    if crop_count == 0 or dithered_count == 0:
+        pytest.skip("Test requires existing _crop and _dithered files")
+
+    # Count original files (non-processed)
+    original_files = [
+        f
+        for f in test_images.iterdir()
+        if f.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}
+        and "_crop" not in f.name
+        and "_dithered" not in f.name
+    ]
+
+    # Run preprocess again
+    result = subprocess.run(
+        ["geink", "preprocess", str(test_images)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+    # Verify it only processed original files, not _crop or _dithered
+    output_lines = result.stdout.strip().split("\n")
+    processed_lines = [line for line in output_lines if "Processing" in line]
+
+    assert len(processed_lines) == len(original_files), (
+        f"Expected {len(original_files)} files to be processed, "
+        f"but got {len(processed_lines)}"
+    )
