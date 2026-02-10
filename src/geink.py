@@ -8,7 +8,8 @@ from loguru import logger
 logger.remove()
 logger.add(lambda msg: print(msg, end=""), format="{message}")
 
-from .config import COLOR_LEVELS, TARGET_HEIGHT, TARGET_WIDTH
+from .config import BITS_PER_PIXEL, COLOR_LEVELS, TARGET_HEIGHT, TARGET_WIDTH
+from .convert_toolkit import convert_png_to_bin
 from .dithering_toolkit import apply_dithering
 from .preprocess_toolkit import _preprocess_image
 
@@ -86,6 +87,39 @@ def preprocess(input_path, output_path):
                 count += 1
 
         logger.success(f"Processed {count} images in {input_dir}")
+
+
+@cli.command()
+@click.argument("input_path", type=click.Path(exists=True))
+@click.argument("output_path", type=click.Path(), required=False)
+@click.option("--width", "-w", type=int, default=TARGET_WIDTH, help="Target width")
+@click.option("--height", "-h", type=int, default=TARGET_HEIGHT, help="Target height")
+@click.option(
+    "--color-levels",
+    "-c",
+    type=int,
+    default=COLOR_LEVELS,
+    help="Number of color levels (must be power of 2)",
+)
+def convert(input_path, output_path, width, height, color_levels):
+    """
+    Converts a dithered image to EPD binary format (.bin).
+
+    The input should be a grayscale PNG image that has already been dithered.
+    Output is a binary file with packed pixel data for e-paper displays.
+    """
+    if output_path is None:
+        input_path_obj = Path(input_path)
+        output_path = str(
+            input_path_obj.with_name(
+                input_path_obj.stem.replace("_dithered", "") + ".bin"
+            )
+        )
+
+    if convert_png_to_bin(input_path, output_path, width, height, color_levels):
+        logger.success(f"Successfully converted to {output_path}")
+    else:
+        logger.error("Conversion failed.")
 
 
 @cli.command()
