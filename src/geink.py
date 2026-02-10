@@ -155,9 +155,18 @@ def convert(input_path, output_path, width, height, color_levels, espslider_dir)
 @cli.command()
 @click.argument("input_path", type=click.Path(exists=True))
 @click.argument("output_path", type=click.Path(), required=False)
-def dither(input_path, output_path):
+@click.option(
+    "--method",
+    "-m",
+    type=click.Choice(["floyd_steinberg", "jarvis_judice_ninke"]),
+    default="floyd_steinberg",
+    help="Dithering algorithm to use",
+)
+def dither(input_path, output_path, method):
     """
     Applies dithering to an image or all _crop images in a directory.
+
+    Use --method/-m to choose the dithering algorithm.
     """
 
     def dither_processor(img_path):
@@ -165,7 +174,7 @@ def dither(input_path, output_path):
         if img is None:
             logger.error(f"Error: Cannot read image '{img_path}'.")
             return None
-        return apply_dithering(img, "floyd_steinberg", COLOR_LEVELS)
+        return apply_dithering(img, method, COLOR_LEVELS)
 
     input_path_obj = Path(input_path)
     if input_path_obj.is_file():
