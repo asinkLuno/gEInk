@@ -37,7 +37,12 @@ def get_image_files(path: str) -> list[str]:
     return []
 
 
-def process_directory(input_dir: str, output_dir: str | None = None):
+def process_directory(
+    input_dir: str,
+    output_dir: str | None = None,
+    apply_dither: bool = False,
+    dither_shades: int = 16,
+):
     """处理目录下所有图片"""
     image_files = get_image_files(input_dir)
     total = len(image_files)
@@ -60,7 +65,12 @@ def process_directory(input_dir: str, output_dir: str | None = None):
             output_path = Path(input_dir) / f"{base}eink{ext}"
 
         logger.info(f"[{idx}/{total}] 处理: {filename}")
-        process_image(input_path_file, str(output_path))
+        process_image(
+            input_path_file,
+            str(output_path),
+            apply_dither=apply_dither,
+            dither_shades=dither_shades,
+        )
         logger.info("")
 
 
@@ -255,12 +265,73 @@ def resize_to_target(img: np.ndarray) -> np.ndarray:
     )
 
 
-def process_image(input_path: str, output_path: str):
+def apply_floyd_steinberg_dithering(img: np.ndarray, shades: int = 16) -> np.ndarray:
+    """
+    对图片应用Floyd-Steinberg抖动算法，将其转换为指定色阶的灰度图像。
+    Args:
+        img: OpenCV图片 (BGR, numpy.ndarray)
+        shades: 目标灰度色阶数量 (例如，16代表4位深度)
+    Returns:
+        抖动后的指定色阶灰度OpenCV图片 (numpy.ndarray)
+    """
+    if shades < 2:
+        logger.warning(f"色阶数量必须至少为2，已自动调整为2。")
+        shades = 2
+    logger.info(f"应用Floyd-Steinberg抖动到 {shades} 级灰度。")
+
+    # 转换为灰度图
+    gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # 复制一份图像用于修改，避免修改原始图像
+    dithered_img = gray_img.copy().astype(np.float32)
+
+    height, width = dithered_img.shape
+
+    # 计算色阶值
+    # 例如，对于16个色阶，值范围是 0, 17, 34, ..., 255
+    levels = np.linspace(0, 255, shades)
+
+    for y in range(height):
+        for x in range(width):
+            old_pixel = dithered_img[y, x]
+
+            # 量化到最近的色阶值
+            # 找到levels中最接近old_pixel的值
+            new_pixel = levels[np.argmin(np.abs(levels - old_pixel))]
+            dithered_img[y, x] = new_pixel
+
+            # 计算量化误差
+            quant_error = old_pixel - new_pixel
+
+            # 将误差传播到周围像素 (Floyd-Steinberg权重)
+            #       X   7/16
+            # 3/16 5/16 1/16
+            if x + 1 < width:
+                dithered_img[y, x + 1] += quant_error * 7 / 16
+            if y + 1 < height:
+                if x - 1 >= 0:
+                    dithered_img[y + 1, x - 1] += quant_error * 3 / 16
+                dithered_img[y + 1, x] += quant_error * 5 / 16
+                if x + 1 < width:
+                    dithered_img[y + 1, x + 1] += quant_error * 1 / 16
+
+    # 将结果裁剪到0-255范围并转换回uint8类型
+    return np.clip(dithered_img, 0, 255).astype(np.uint8)
+
+
+def process_image(
+    input_path: str,
+    output_path: str,
+    apply_dither: bool = False,
+    dither_shades: int = 16,
+):
     """
     完整的图片处理流程，全程使用OpenCV。
     Args:
         input_path: 输入图片路径
         output_path: 输出图片路径
+        apply_dither: 是否应用Floyd-Steinberg抖动
+        dither_shades: 抖动后的灰度色阶数量 (例如，16代表4位深度)
     """
     img = cv2.imread(input_path)
     if img is None:
@@ -290,6 +361,9 @@ def process_image(input_path: str, output_path: str):
     final = resize_to_target(padded)
     logger.info(f"最终尺寸: {final.shape[1]}x{final.shape[0]}")  # width x height
 
+    # 4. 应用抖动 (如果启用)
+    if apply_dither:
+        final = apply_floyd_steinberg_dithering(final, shades=dither_shades)
     # 保存结果
     cv2.imwrite(output_path, final)
     logger.info(f"已保存到: {output_path}")
@@ -305,7 +379,18 @@ def process_image(input_path: str, output_path: str):
     default=None,
     help="指定输出目录。如果未指定，图片将保存到输入目录。",
 )
-def eink_process(input_path: str, output_dir: str | None):
+@click.option(
+    "--dither/--no-dither",
+    default=False,
+    help="是否应用Floyd-Steinberg抖动算法。",
+)
+@click.option(
+    "--shades",
+    type=click.IntRange(2, 256),  # Shades must be at least 2 (B&W)
+    default=4,  # Default for 2-bit depth (4 shades)
+    help="抖动后的灰度色阶数量 (例如，4代表2位深度)。仅在启用抖动时有效。",
+)
+def eink_process(input_path: str, output_dir: str | None, dither: bool, shades: int):
     """
     图片预处理工具的主入口点。
     """
@@ -323,10 +408,17 @@ def eink_process(input_path: str, output_dir: str | None):
         filename = input_path_obj.name
         base, ext = os.path.splitext(filename)
         output_file = output_folder / f"{base}eink{ext}"
-        process_image(str(input_path_obj), str(output_file))
+        process_image(
+            str(input_path_obj),
+            str(output_file),
+            apply_dither=dither,
+            dither_shades=shades,
+        )
 
     elif input_path_obj.is_dir():
-        process_directory(input_path, output_dir)
+        process_directory(
+            input_path, output_dir, apply_dither=dither, dither_shades=shades
+        )
     else:
         logger.error(f"无效的输入路径: {input_path}")
 

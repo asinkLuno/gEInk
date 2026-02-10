@@ -21,3 +21,6 @@ build/
 .vscode/
 .idea/
 *.swp
+
+# External drivers
+E-Paper_ESP8266_Driver_Board_Code/
