@@ -1,8 +1,8 @@
 from pathlib import Path
 
 import click
+import cv2
 from loguru import logger
-from PIL import Image
 
 # Configure loguru to write to stdout for Click CLI testing
 logger.remove()
@@ -21,10 +21,10 @@ def process_single_image(input_path, output_path, processor_func):
     logger.info(f"Processing {input_path} -> {output_path}")
     processed_img = processor_func(input_path)
 
-    if processed_img:
+    if processed_img is not None:
         try:
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-            processed_img.save(output_path)
+            cv2.imwrite(output_path, processed_img)
             logger.success(f"Saved: {output_path}")
         except Exception as e:
             logger.error(f"Error saving {output_path}: {e}")
@@ -57,7 +57,6 @@ def preprocess(input_path, output_path):
     """
     input_path_obj = Path(input_path)
     if input_path_obj.is_file():
-        # Single file mode: 图片_4.jpg -> 图片_4_crop.jpg
         output_path = output_path or str(
             input_path_obj.with_name(
                 f"{input_path_obj.stem}_crop{input_path_obj.suffix}"
@@ -65,9 +64,9 @@ def preprocess(input_path, output_path):
         )
         processed_img = _preprocess_image(input_path, TARGET_WIDTH, TARGET_HEIGHT)
 
-        if processed_img:
+        if processed_img is not None:
             try:
-                processed_img.save(output_path)
+                cv2.imwrite(output_path, processed_img)
                 logger.success(f"Successfully preprocessed and saved to {output_path}")
             except Exception as e:
                 logger.error(f"Error saving preprocessed image to {output_path}: {e}")
@@ -75,7 +74,6 @@ def preprocess(input_path, output_path):
             logger.error("Preprocessing failed.")
 
     else:
-        # Directory mode: output to same directory with _crop suffix
         input_dir = Path(input_path)
 
         image_files = get_image_files(input_dir)
@@ -99,19 +97,14 @@ def dither(input_path, output_path):
     """
 
     def dither_processor(img_path):
-        try:
-            input_img = Image.open(img_path).convert("L")
-        except FileNotFoundError:
-            logger.error(f"Error: Input image '{img_path}' not found.")
+        img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            logger.error(f"Error: Cannot read image '{img_path}'.")
             return None
-        except Exception as e:
-            logger.error(f"Error opening or converting image '{img_path}': {e}")
-            return None
-        return apply_dithering(input_img, "floyd_steinberg", COLOR_LEVELS)
+        return apply_dithering(img, "floyd_steinberg", COLOR_LEVELS)
 
     input_path_obj = Path(input_path)
     if input_path_obj.is_file():
-        # Single file mode: 图片_4_crop.jpg -> 图片_4_dithered.jpg
         if output_path is None:
             output_path = str(
                 input_path_obj.with_name(
@@ -121,9 +114,9 @@ def dither(input_path, output_path):
             )
         dithered_img = dither_processor(input_path)
 
-        if dithered_img:
+        if dithered_img is not None:
             try:
-                dithered_img.save(output_path)
+                cv2.imwrite(output_path, dithered_img)
                 logger.success(f"Successfully dithered and saved to {output_path}")
             except Exception as e:
                 logger.error(f"Error saving dithered image to {output_path}: {e}")
@@ -131,7 +124,6 @@ def dither(input_path, output_path):
             logger.error("Dithering failed.")
 
     else:
-        # Directory mode: read _crop files, save as _dithered
         input_dir = Path(input_path)
 
         crop_files = [f for f in input_dir.iterdir() if "_crop" in f.name]

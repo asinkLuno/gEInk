@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 from loguru import logger
-from PIL import Image
 
 from .config import TARGET_HEIGHT, TARGET_WIDTH
 
@@ -251,10 +250,4 @@ def _preprocess_image(
     logger.info(f"处理后尺寸: {padded.shape[1]}x{padded.shape[0]}")
 
     # 3. Resize到目标尺寸
-    final = resize_to_target(padded, target_width, target_height)
-    logger.info(f"最终尺寸: {final.shape[1]}x{final.shape[0]}")
-
-    # 转换为 PIL 图像 (BGR -> RGB)
-    final_rgb = cv2.cvtColor(final, cv2.COLOR_BGR2RGB)
-    pil_img = Image.fromarray(final_rgb)
-    return pil_img
+    return resize_to_target(padded, target_width, target_height)
