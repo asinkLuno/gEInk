@@ -11,6 +11,12 @@ __pycache__/
 .venv/
 venv/
 
+# Build / Packaging
+*.egg-info/
+dist/
+build/
+*.egg
+
 # IDE
 .vscode/
 .idea/

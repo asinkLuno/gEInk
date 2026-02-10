@@ -8,13 +8,14 @@
 """
 
 import os
-import sys
 from collections import Counter
 from pathlib import Path
 from typing import Tuple
 
+import click
 import cv2
 import numpy as np
+from loguru import logger
 
 # 支持的图片格式
 SUPPORTED_FORMATS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
@@ -36,25 +37,31 @@ def get_image_files(path: str) -> list[str]:
     return []
 
 
-def process_directory(input_dir: str):
+def process_directory(input_dir: str, output_dir: str | None = None):
     """处理目录下所有图片"""
     image_files = get_image_files(input_dir)
     total = len(image_files)
 
     if total == 0:
-        print(f"在 {input_dir} 中未找到图片文件")
+        logger.warning(f"在 {input_dir} 中未找到图片文件")
         return
 
-    print(f"找到 {total} 张图片，开始处理...\n")
+    logger.info(f"找到 {total} 张图片，开始处理...\n")
 
-    for idx, input_path in enumerate(image_files, 1):
-        filename = os.path.basename(input_path)
+    for idx, input_path_file in enumerate(image_files, 1):
+        filename = os.path.basename(input_path_file)
         base, ext = os.path.splitext(filename)
-        output_path = os.path.join(input_dir, f"{base}eink{ext}")
 
-        print(f"[{idx}/{total}] 处理: {filename}")
-        process_image(input_path, output_path)
-        print()
+        if output_dir:
+            output_folder = Path(output_dir)
+            output_folder.mkdir(parents=True, exist_ok=True)
+            output_path = output_folder / f"{base}eink{ext}"
+        else:
+            output_path = Path(input_dir) / f"{base}eink{ext}"
+
+        logger.info(f"[{idx}/{total}] 处理: {filename}")
+        process_image(input_path_file, str(output_path))
+        logger.info("")
 
 
 def get_background_color(img: np.ndarray) -> Tuple[int, int, int]:
@@ -257,48 +264,72 @@ def process_image(input_path: str, output_path: str):
     """
     img = cv2.imread(input_path)
     if img is None:
-        print(f"错误: 无法读取图片 {input_path}")
+        logger.error(f"错误: 无法读取图片 {input_path}")
         return
 
-    print(f"原始尺寸: {img.shape[1]}x{img.shape[0]}")  # width x height
+    logger.info(f"原始尺寸: {img.shape[1]}x{img.shape[0]}")  # width x height
 
     # 1. 检测并裁切物体
     left, right, top, bottom = detect_object_bounds(img)
     cropped = img[top:bottom, left:right]
-    print(f"裁切后尺寸: {cropped.shape[1]}x{cropped.shape[0]}")  # width x height
+    logger.info(f"裁切后尺寸: {cropped.shape[1]}x{cropped.shape[0]}")  # width x height
 
     # 2. 根据背景类型决定Padding或按比例裁剪
     if is_solid_background(cropped):
-        print("背景为纯色，进行Padding到指定比例...")
+        logger.info("背景为纯色，进行Padding到指定比例...")
         padded = pad_to_ratio(cropped)
     else:
-        print("背景不为纯色，尽量裁剪到5:3/3:5比例...")
+        logger.info("背景不为纯色，尽量裁剪到5:3/3:5比例...")
         height, width, _ = cropped.shape
         target_ratio = 5 / 3 if width >= height else 3 / 5
         padded = crop_to_target_ratio(cropped, target_ratio)
 
-    print(f"处理后尺寸: {padded.shape[1]}x{padded.shape[0]}")  # width x height
+    logger.info(f"处理后尺寸: {padded.shape[1]}x{padded.shape[0]}")  # width x height
 
     # 3. Resize到目标尺寸
     final = resize_to_target(padded)
-    print(f"最终尺寸: {final.shape[1]}x{final.shape[0]}")  # width x height
+    logger.info(f"最终尺寸: {final.shape[1]}x{final.shape[0]}")  # width x height
 
     # 保存结果
     cv2.imwrite(output_path, final)
-    print(f"已保存到: {output_path}")
+    logger.info(f"已保存到: {output_path}")
 
     return final
 
 
-if __name__ == "__main__":
-    input_path = (
-        sys.argv[1] if len(sys.argv) > 1 else "/home/guozr/CODE/gEInk/test_input.webp"
-    )
+@click.command(help="一个图片预处理工具，用于电子墨水屏设备。")
+@click.argument("input_path", type=click.Path(exists=True), required=True)
+@click.option(
+    "--output_dir",
+    type=click.Path(file_okay=False, writable=True),
+    default=None,
+    help="指定输出目录。如果未指定，图片将保存到输入目录。",
+)
+def eink_process(input_path: str, output_dir: str | None):
+    """
+    图片预处理工具的主入口点。
+    """
+    logger.info(f"开始处理: {input_path}")
+    input_path_obj = Path(input_path)
 
-    # 判断是文件还是目录
-    if os.path.isdir(input_path):
-        process_directory(input_path)
+    if input_path_obj.is_file():
+        # 如果是文件，确定输出路径
+        if output_dir:
+            output_folder = Path(output_dir)
+            output_folder.mkdir(parents=True, exist_ok=True)
+        else:
+            output_folder = input_path_obj.parent
+
+        filename = input_path_obj.name
+        base, ext = os.path.splitext(filename)
+        output_file = output_folder / f"{base}eink{ext}"
+        process_image(str(input_path_obj), str(output_file))
+
+    elif input_path_obj.is_dir():
+        process_directory(input_path, output_dir)
     else:
-        base, ext = os.path.splitext(input_path)
-        output_file = f"{base}eink{ext}"
-        process_image(input_path, output_file)
+        logger.error(f"无效的输入路径: {input_path}")
+
+
+if __name__ == "__main__":
+    eink_process()
