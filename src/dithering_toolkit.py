@@ -1,106 +1,103 @@
+import cv2
 import numpy as np
+from loguru import logger
 from PIL import Image
 
 from .config import COLOR_LEVELS
 
 
-def _quantize_pixel(value: float, color_levels: int) -> int:
+def _pil_to_cv2(pil_img: Image.Image) -> np.ndarray:
     """
-    Quantizes a float pixel value (0-255) to one of the specified color_levels.
+    Convert PIL Image to OpenCV BGR format.
+    Handles RGB, RGBA, and L modes.
     """
-    if color_levels <= 1:
-        raise ValueError("color_levels must be greater than 1")
+    if pil_img.mode == "RGB":
+        # PIL RGB -> OpenCV BGR
+        cv2_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+    elif pil_img.mode == "RGBA":
+        # PIL RGBA -> OpenCV BGRA -> BGR
+        cv2_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGBA2BGRA)
+        cv2_img = cv2.cvtColor(cv2_img, cv2.COLOR_BGRA2BGR)
+    elif pil_img.mode == "L":
+        # Grayscale -> BGR (3 identical channels)
+        gray = np.array(pil_img)
+        cv2_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    else:
+        # Convert to RGB first
+        rgb_img = pil_img.convert("RGB")
+        cv2_img = cv2.cvtColor(np.array(rgb_img), cv2.COLOR_RGB2BGR)
+    return cv2_img
 
-    # Calculate the step size for quantization
-    # For color_levels=2, step_size = 255 / 1 = 255 (0 or 255)
-    # For color_levels=4, step_size = 255 / 3 = 85 (0, 85, 170, 255)
-    step_size = 255 / (color_levels - 1)
 
-    # Quantize the value
-    quantized_value = round(value / step_size) * step_size
-
-    # Clamp to 0-255 range
-    return int(max(0, min(255, quantized_value)))
-
-
-def jarvis_judice_ninke_dithering(
-    image_pil: Image.Image, color_levels: int = COLOR_LEVELS
-) -> Image.Image:
+def _cv2_to_pil(cv2_img: np.ndarray) -> Image.Image:
     """
-    Applies Jarvis, Judice, and Ninke error diffusion dithering to a PIL image,
-    quantizing to the specified number of color_levels.
+    Convert OpenCV BGR image to PIL RGB Image.
     """
-    img_gray = image_pil.convert("L")  # Convert to grayscale
-    pixels = np.array(img_gray, dtype=float)  # Convert to float for error diffusion
-    width, height = img_gray.size
-
-    # Jarvis, Judice, Ninke kernel
-    # Sum of weights: (7+5)*1 + (3+5+7+5+3)*1 + (1+3+5+3+1)*1 = 12 + 23 + 13 = 48
-    jjn_kernel = [
-        # (dx, dy, weight) relative to current pixel (x,y)
-        (1, 0, 7 / 48),
-        (2, 0, 5 / 48),  # Current row
-        (-2, 1, 3 / 48),
-        (-1, 1, 5 / 48),
-        (0, 1, 7 / 48),
-        (1, 1, 5 / 48),
-        (2, 1, 3 / 48),  # Next row
-        (-2, 2, 1 / 48),
-        (-1, 2, 3 / 48),
-        (0, 2, 5 / 48),
-        (1, 2, 3 / 48),
-        (2, 2, 1 / 48),  # Row after next
-    ]
-
-    for y in range(height):
-        for x in range(width):
-            old_pixel = pixels[y, x]
-            new_pixel = _quantize_pixel(old_pixel, color_levels)
-            pixels[y, x] = new_pixel
-            error = old_pixel - new_pixel
-
-            for dx, dy, weight in jjn_kernel:
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < width and 0 <= ny < height:
-                    pixels[ny, nx] += error * weight
-
-    # Convert back to a PIL Image in 'L' mode with the quantized colors
-    return Image.fromarray(pixels.astype(np.uint8)).convert("L")
+    rgb_img = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
+    return Image.fromarray(rgb_img)
 
 
 def floyd_steinberg_dithering(
     image_pil: Image.Image, color_levels: int = COLOR_LEVELS
 ) -> Image.Image:
     """
-    Applies Floyd-Steinberg error diffusion dithering to a PIL image,
-    quantizing to the specified number of color_levels.
+    对图片应用Floyd-Steinberg抖动算法，将其转换为指定色阶的灰度图像。
+    基于旧版本 image_processor.py 的实现。
+    Args:
+        image_pil: PIL图片
+        color_levels: 目标灰度色阶数量 (例如，16代表4位深度)
+    Returns:
+        抖动后的指定色阶灰度PIL图片 (L模式)
     """
-    img_gray = image_pil.convert("L")  # Convert to grayscale
-    pixels = np.array(img_gray, dtype=float)  # Convert to float for error diffusion
-    width, height = img_gray.size
+    if color_levels < 2:
+        logger.warning(f"色阶数量必须至少为2，已自动调整为2。")
+        color_levels = 2
+    logger.info(f"应用Floyd-Steinberg抖动到 {color_levels} 级灰度。")
 
-    # Floyd-Steinberg kernel
-    # Sum of weights: 7/16 + 3/16 + 5/16 + 1/16 = 16/16 = 1
-    fs_kernel = [
-        (1, 0, 7 / 16),  # Current row, next pixel
-        (-1, 1, 3 / 16),  # Next row, previous pixel
-        (0, 1, 5 / 16),  # Next row, current pixel
-        (1, 1, 1 / 16),  # Next row, next pixel
-    ]
+    # Convert PIL to OpenCV BGR
+    img_bgr = _pil_to_cv2(image_pil)
+
+    # 转换为灰度图
+    gray_img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+
+    # 复制一份图像用于修改，避免修改原始图像
+    dithered_img = gray_img.copy().astype(np.float32)
+
+    height, width = dithered_img.shape
+
+    # 计算色阶值（移到循环外，避免重复计算）
+    # 例如，对于16个色阶，值范围是 0, 17, 34, ..., 255
+    levels = np.linspace(0, 255, color_levels)
 
     for y in range(height):
         for x in range(width):
-            old_pixel = pixels[y, x]
-            new_pixel = _quantize_pixel(old_pixel, color_levels)
-            pixels[y, x] = new_pixel
-            error = old_pixel - new_pixel
+            old_pixel = dithered_img[y, x]
 
-            for dx, dy, weight in fs_kernel:
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < width and 0 <= ny < height:
-                    pixels[ny, nx] += error * weight
+            # 量化到最近的色阶值
+            # 找到levels中最接近old_pixel的值
+            new_pixel = levels[np.argmin(np.abs(levels - old_pixel))]
+            dithered_img[y, x] = new_pixel
 
-    return Image.fromarray(pixels.astype(np.uint8)).convert("L")
+            # 计算量化误差
+            quant_error = old_pixel - new_pixel
+
+            # 将误差传播到周围像素 (Floyd-Steinberg权重)
+            #       X   7/16
+            # 3/16 5/16 1/16
+            if x + 1 < width:
+                dithered_img[y, x + 1] += quant_error * 7 / 16
+            if y + 1 < height:
+                if x - 1 >= 0:
+                    dithered_img[y + 1, x - 1] += quant_error * 3 / 16
+                dithered_img[y + 1, x] += quant_error * 5 / 16
+                if x + 1 < width:
+                    dithered_img[y + 1, x + 1] += quant_error * 1 / 16
+
+    # 将结果裁剪到0-255范围并转换回uint8类型
+    dithered_result = np.clip(dithered_img, 0, 255).astype(np.uint8)
+
+    # Convert back to PIL (grayscale)
+    return Image.fromarray(dithered_result).convert("L")
 
 
 def apply_dithering(
@@ -110,11 +107,10 @@ def apply_dithering(
 ) -> Image.Image:
     """
     Applies the specified dithering algorithm to a PIL image.
+    Currently only supports "floyd_steinberg".
     """
     if dither_method == "floyd_steinberg":
         return floyd_steinberg_dithering(image_pil, color_levels)
-    elif dither_method == "jarvis_judice_ninke":
-        return jarvis_judice_ninke_dithering(image_pil, color_levels)
     else:
         raise ValueError(f"Unsupported dithering method: {dither_method}")
 
