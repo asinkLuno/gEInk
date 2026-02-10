@@ -8,8 +8,8 @@ from loguru import logger
 logger.remove()
 logger.add(lambda msg: print(msg, end=""), format="{message}")
 
-from .config import BITS_PER_PIXEL, COLOR_LEVELS, TARGET_HEIGHT, TARGET_WIDTH
-from .convert_toolkit import convert_png_to_bin
+from .config import COLOR_LEVELS, TARGET_HEIGHT, TARGET_WIDTH
+from .convert_toolkit import convert_folder, convert_png_to_bin, convert_bin_to_c_array
 from .dithering_toolkit import apply_dithering
 from .preprocess_toolkit import _preprocess_image
 
@@ -101,25 +101,46 @@ def preprocess(input_path, output_path):
     default=COLOR_LEVELS,
     help="Number of color levels (must be power of 2)",
 )
-def convert(input_path, output_path, width, height, color_levels):
+@click.option(
+    "--espslider-dir",
+    type=click.Path(),
+    default="ESPSlider/",
+    help="ESPSlider directory for .h output (default: ESPSlider/)",
+)
+def convert(input_path, output_path, width, height, color_levels, espslider_dir):
     """
-    Converts a dithered image to EPD binary format (.bin).
+    Converts _dithered images to EPD binary format (.bin).
 
-    The input should be a grayscale PNG image that has already been dithered.
-    Output is a binary file with packed pixel data for e-paper displays.
+    Accepts a single image file or a directory of _dithered images.
+    Output .bin files are saved in the same directory by default.
+    C header files are automatically generated in ESPSlider/ directory.
     """
-    if output_path is None:
-        input_path_obj = Path(input_path)
-        output_path = str(
-            input_path_obj.with_name(
-                input_path_obj.stem.replace("_dithered", "") + ".bin"
+    input_path_obj = Path(input_path)
+
+    if input_path_obj.is_file():
+        if output_path is None:
+            output_path = str(
+                input_path_obj.with_name(
+                    input_path_obj.stem.replace("_dithered", "") + ".bin"
+                )
             )
-        )
 
-    if convert_png_to_bin(input_path, output_path, width, height, color_levels):
-        logger.success(f"Successfully converted to {output_path}")
+        if convert_png_to_bin(input_path, output_path, width, height, color_levels):
+            logger.success(f"Successfully converted to {output_path}")
+            bin_path = Path(output_path)
+            array_name = f"{bin_path.stem}_data"
+            header_path = Path(espslider_dir) / f"{bin_path.stem}.h"
+            convert_bin_to_c_array(output_path, array_name, str(header_path))
+        else:
+            logger.error("Conversion failed.")
+
     else:
-        logger.error("Conversion failed.")
+        count = convert_folder(
+            input_path, output_path, width, height, color_levels,
+            espslider_dir=espslider_dir
+        )
+        if count == 0:
+            logger.error("No files converted.")
 
 
 @cli.command()
