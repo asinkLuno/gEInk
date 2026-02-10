@@ -9,16 +9,20 @@
 
 import os
 import sys
-from pathlib import Path
-from typing import List
+from collections import Counter
+from typing import Tuple
 
 from PIL import Image
 
 # 支持的图片格式
 SUPPORTED_FORMATS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 
+# 屏幕尺寸常量
+SCREEN_SHORT = 480
+SCREEN_LONG = 800
 
-def get_image_files(path: str) -> List[str]:
+
+def get_image_files(path: str) -> list[str]:
     """获取路径下的所有图片文件"""
     p = Path(path)
     if p.is_file():
@@ -53,171 +57,90 @@ def process_directory(input_dir: str):
 
 def get_background_color(img):
     """获取图片的背景色（取四个角的颜色，取众数）"""
-    # 确保是RGB模式
     if img.mode != "RGB":
         img = img.convert("RGB")
-
-    corners = []
     width, height = img.size
 
-    # 采样四个角
-    corners.append(img.getpixel((0, 0)))
-    corners.append(img.getpixel((width - 1, 0)))
-    corners.append(img.getpixel((0, height - 1)))
-    corners.append(img.getpixel((width - 1, height - 1)))
-
-    # 统计颜色出现次数
-    from collections import Counter
-
-    color_counts = Counter(corners)
-    return color_counts.most_common(1)[0][0]
+    corners = [
+        img.getpixel((0, 0)),
+        img.getpixel((width - 1, 0)),
+        img.getpixel((0, height - 1)),
+        img.getpixel((width - 1, height - 1)),
+    ]
+    return Counter(corners).most_common(1)[0][0]
 
 
-def detect_object_bounds(img, threshold=240):
-    """
-    检测物体边界
-    通过检测非背景色的像素来确定物体边界
-    """
+def detect_object_bounds(img, threshold=240) -> Tuple[int, int, int, int]:
+    """检测物体边界"""
     width, height = img.size
     bg_color = get_background_color(img)
 
-    # 转换为RGB
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-
     left, right, top, bottom = width, 0, height, 0
 
-    # 扫描每一行和每一列
     for y in range(height):
         for x in range(width):
             pixel = img.getpixel((x, y))
-            # 判断是否为背景色（使用欧几里得距离）
-            if not is_similar_color(pixel, bg_color, threshold):
-                if x < left:
-                    left = x
-                if x > right:
-                    right = x
-                if y < top:
-                    top = y
-                if y > bottom:
-                    bottom = y
+            r1, g1, b1 = pixel[:3] if len(pixel) >= 3 else (pixel[0],) * 3
+            r2, g2, b2 = bg_color[:3]
+            distance = ((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2) ** 0.5
 
-    # 如果没有检测到物体，返回原图边界
-    if left == width and right == 0:
+            if distance >= (255 - threshold):
+                left = min(left, x)
+                right = max(right, x)
+                top = min(top, y)
+                bottom = max(bottom, y)
+
+    if left == width:
         return 0, width, 0, height
 
-    # 添加一些边距
     padding = 5
-    left = max(0, left - padding)
-    right = min(width, right + padding)
-    top = max(0, top - padding)
-    bottom = min(height, bottom + padding)
-
-    return left, right, top, bottom
-
-
-def is_similar_color(pixel, bg_color, threshold):
-    """判断两个颜色是否相似"""
-    if len(pixel) >= 3:
-        r1, g1, b1 = pixel[:3]
-    else:
-        r1, g1, b1 = pixel[0], pixel[0], pixel[0]
-
-    if len(bg_color) >= 3:
-        r2, g2, b2 = bg_color[:3]
-    else:
-        r2, g2, b2 = bg_color[0], bg_color[0], bg_color[0]
-
-    # 计算欧几里得距离
-    distance = ((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2) ** 0.5
-    return distance < (255 - threshold)
-
-
-def crop_to_object(img, bounds):
-    """裁切到物体边界"""
-    left, right, top, bottom = bounds
-    return img.crop((left, top, right, bottom))
-
-
-def calculate_padding_size(crop_width, crop_height, target_ratio=5 / 3):
-    """
-    计算Padding尺寸，使图片达到5:3比例
-    返回 (new_width, new_height, pad_left, pad_top)
-    """
-    current_ratio = crop_width / crop_height
-
-    if abs(current_ratio - target_ratio) < 0.01:
-        # 已经是5:3比例
-        return crop_width, crop_height, 0, 0
-
-    if current_ratio > target_ratio:
-        # 图片比目标比例更宽，需要增加高度
-        new_height = int(crop_width / target_ratio)
-        pad_top = (new_height - crop_height) // 2
-        pad_left = 0
-        return crop_width, new_height, pad_left, pad_top
-    else:
-        # 图片比目标比例更窄，需要增加宽度
-        new_width = int(crop_height * target_ratio)
-        pad_left = (new_width - crop_width) // 2
-        pad_top = 0
-        return new_width, crop_height, pad_left, pad_top
+    return (
+        max(0, left - padding),
+        min(width, right + padding),
+        max(0, top - padding),
+        min(height, bottom + padding),
+    )
 
 
 def pad_to_ratio(img):
     """Padding图片到指定比例"""
     width, height = img.size
+    ratio = 5 / 3 if width >= height else 3 / 5
+    current_ratio = width / height
 
-    # 根据图片方向决定目标比例
-    if width >= height:
-        # 横图，目标比例 5:3
-        target_ratio = 5 / 3
-    else:
-        # 竖图，目标比例 3:5
-        target_ratio = 3 / 5
-
-    new_width, new_height, pad_left, pad_top = calculate_padding_size(
-        width, height, target_ratio
-    )
-
-    if pad_left == 0 and pad_top == 0:
+    if abs(current_ratio - ratio) < 0.01:
         return img
 
-    # 获取背景色
-    bg_color = get_background_color(img)
-
-    # 创建新图片
-    new_img = Image.new("RGB", (new_width, new_height), bg_color)
-    new_img.paste(img, (pad_left, pad_top))
+    if current_ratio > ratio:
+        new_height = int(width / ratio)
+        pad_top = (new_height - height) // 2
+        new_img = Image.new("RGB", (width, new_height), get_background_color(img))
+        new_img.paste(img, (0, pad_top))
+    else:
+        new_width = int(height * ratio)
+        pad_left = (new_width - width) // 2
+        new_img = Image.new("RGB", (new_width, height), get_background_color(img))
+        new_img.paste(img, (pad_left, 0))
 
     return new_img
 
 
-def resize_to_target(img, target_width=480, target_height=800):
+def resize_to_target(img):
     """Resize图片到目标尺寸"""
     width, height = img.size
-
-    # 根据方向决定目标尺寸
     if width > height:
-        # 横图，resize到800*480
-        target_width, target_height = 800, 480
-    else:
-        # 竖图，resize到480*800
-        target_width, target_height = 480, 800
-
-    return img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+        return img.resize((SCREEN_LONG, SCREEN_SHORT), Image.Resampling.LANCZOS)
+    return img.resize((SCREEN_SHORT, SCREEN_LONG), Image.Resampling.LANCZOS)
 
 
 def process_image(input_path, output_path):
     """完整的图片处理流程"""
-    # 打开图片
     img = Image.open(input_path)
-
     print(f"原始尺寸: {img.size}")
 
     # 1. 检测并裁切物体
-    bounds = detect_object_bounds(img)
-    cropped = crop_to_object(img, bounds)
+    left, right, top, bottom = detect_object_bounds(img)
+    cropped = img.crop((left, top, right, bottom))
     print(f"裁切后尺寸: {cropped.size}")
 
     # 2. Padding到5:3或3:5比例
