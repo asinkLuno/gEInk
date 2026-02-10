@@ -115,3 +115,50 @@ geink convert output_dithered.png output.bin --width 800 --height 480 --color-le
 文件大小计算：`width × height ÷ 8` bytes
 
 例如 800×480 的图片输出文件大小为 48,000 bytes。
+
+---
+
+## ESPSlider 固件烧录
+
+ESPSlider 是运行在 ESP8266 上的电子墨水屏驱动程序，通过 Web 界面接收并显示处理后的图像。
+
+### 编译固件
+
+```bash
+# 进入项目目录
+cd ESPSlider
+
+# 确保主文件名与目录名匹配（Arduino CLI 要求）
+mv Loader.ino ESPSlider.ino
+
+# 编译（使用 generic 板型）
+arduino-cli compile --fqbn esp8266:esp8266:generic /home/guozr/CODE/gEInk/ESPSlider
+```
+
+编译成功后会生成固件文件：
+- `/home/guozr/.cache/arduino/sketches/.../ESPSlider.ino.bin` - 烧录用固件
+- `/home/guozr/.cache/arduino/sketches/.../ESPSlider.ino.elf` - ELF 调试文件
+
+### 烧录固件
+
+```bash
+# 通过串口烧录（需要先连接 USB 转串口模块）
+arduino-cli upload -p /dev/ttyUSB0 --fqbn esp8266:esp8266:generic /home/guozr/CODE/gEInk/ESPSlider
+```
+
+### 查看串口日志
+
+```bash
+# 115200 波特率查看启动日志
+screen /dev/ttyUSB0 115200
+# 或
+minicom -D /dev/ttyUSB0 -b 115200
+```
+
+### 资源使用
+
+| 资源 | 使用量 | 总量 | 占比 |
+|------|--------|------|------|
+| RAM (全局/静态) | 48,472 B | 80,192 B | 60% |
+| IRAM (指令内存) | 60,807 B | 65,536 B | 92% |
+| Flash (代码) | 304,024 B | 1,048,576 B | 28% |
