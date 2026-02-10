@@ -31,9 +31,13 @@ def get_image_files(path: str) -> list[str]:
     if p.is_file():
         return [str(p)]
     elif p.is_dir():
-        return sorted(
-            [str(f) for f in p.iterdir() if f.suffix.lower() in SUPPORTED_FORMATS]
-        )
+        image_files = []
+        for f in p.iterdir():
+            if f.suffix.lower() in SUPPORTED_FORMATS:
+                # 检查文件名是否以 '_eink' 结尾 (不包括扩展名)
+                if not f.stem.endswith("_eink"):
+                    image_files.append(str(f))
+        return sorted(image_files)
     return []
 
 
@@ -41,7 +45,7 @@ def process_directory(
     input_dir: str,
     output_dir: str | None = None,
     apply_dither: bool = False,
-    dither_shades: int = 16,
+    dither_shades: int = 4, # Default to 4 shades as per user clarification
 ):
     """处理目录下所有图片"""
     image_files = get_image_files(input_dir)
@@ -56,13 +60,13 @@ def process_directory(
     for idx, input_path_file in enumerate(image_files, 1):
         filename = os.path.basename(input_path_file)
         base, ext = os.path.splitext(filename)
-
+        
         if output_dir:
             output_folder = Path(output_dir)
             output_folder.mkdir(parents=True, exist_ok=True)
-            output_path = output_folder / f"{base}eink{ext}"
+            output_path = output_folder / f"{base}_eink{ext}"
         else:
-            output_path = Path(input_dir) / f"{base}eink{ext}"
+            output_path = Path(input_dir) / f"{base}_eink{ext}"
 
         logger.info(f"[{idx}/{total}] 处理: {filename}")
         process_image(
@@ -265,12 +269,12 @@ def resize_to_target(img: np.ndarray) -> np.ndarray:
     )
 
 
-def apply_floyd_steinberg_dithering(img: np.ndarray, shades: int = 16) -> np.ndarray:
+def apply_floyd_steinberg_dithering(img: np.ndarray, shades: int = 4) -> np.ndarray:
     """
     对图片应用Floyd-Steinberg抖动算法，将其转换为指定色阶的灰度图像。
     Args:
         img: OpenCV图片 (BGR, numpy.ndarray)
-        shades: 目标灰度色阶数量 (例如，16代表4位深度)
+        shades: 目标灰度色阶数量 (例如，4代表2位深度)
     Returns:
         抖动后的指定色阶灰度OpenCV图片 (numpy.ndarray)
     """
@@ -288,7 +292,7 @@ def apply_floyd_steinberg_dithering(img: np.ndarray, shades: int = 16) -> np.nda
     height, width = dithered_img.shape
 
     # 计算色阶值
-    # 例如，对于16个色阶，值范围是 0, 17, 34, ..., 255
+    # 例如，对于4个色阶，值范围是 0, 85, 170, 255
     levels = np.linspace(0, 255, shades)
 
     for y in range(height):
@@ -323,7 +327,7 @@ def process_image(
     input_path: str,
     output_path: str,
     apply_dither: bool = False,
-    dither_shades: int = 16,
+    dither_shades: int = 4,
 ):
     """
     完整的图片处理流程，全程使用OpenCV。
@@ -331,7 +335,7 @@ def process_image(
         input_path: 输入图片路径
         output_path: 输出图片路径
         apply_dither: 是否应用Floyd-Steinberg抖动
-        dither_shades: 抖动后的灰度色阶数量 (例如，16代表4位深度)
+        dither_shades: 抖动后的灰度色阶数量 (例如，4代表2位深度)
     """
     img = cv2.imread(input_path)
     if img is None:
@@ -407,7 +411,7 @@ def eink_process(input_path: str, output_dir: str | None, dither: bool, shades: 
 
         filename = input_path_obj.name
         base, ext = os.path.splitext(filename)
-        output_file = output_folder / f"{base}eink{ext}"
+        output_file = output_folder / f"{base}_eink{ext}"
         process_image(
             str(input_path_obj),
             str(output_file),
