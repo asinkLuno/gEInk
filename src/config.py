@@ -10,7 +10,7 @@ config = dotenv_values(".env")
 # Default values
 DEFAULT_TARGET_WIDTH = 800
 DEFAULT_TARGET_HEIGHT = 480
-DEFAULT_COLOR_LEVELS = 4  # 2-bit grayscale (4 levels)
+DEFAULT_COLOR_LEVELS = 2  # 1-bit (2 levels)
 
 
 def get_config_value(key, default, type_cast=str):

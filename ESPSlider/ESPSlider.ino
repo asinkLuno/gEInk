@@ -21,11 +21,11 @@ struct ImageInfo {
 
 // Image array (5 images) - stored in Flash
 const ImageInfo images[] = {
-    {image1_data, 96000},
-    {image2_data, 96000},
-    {image3_data, 96000},
-    {image4_data, 96000},
-    {image5_data, 96000},
+    {image1_data, 48000},
+    {image2_data, 48000},
+    {image3_data, 48000},
+    {image4_data, 48000},
+    {image5_data, 48000},
 };
 const int IMAGE_COUNT = 5;
 
