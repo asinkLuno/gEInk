@@ -1,161 +1,107 @@
-#include <ESP8266WiFi.h>
-#include <WiFiClient.h>
-#include <ESP8266WebServer.h>
-#include <ESP8266mDNS.h>
-#include "scripts.h"    // JavaScript code
-#include "css.h"        // Cascading Style Sheets
-#include "html.h"       // HTML page of the tool
-#include "epd.h"        // e-Paper driver
+/**
+ * ESPSlider - Offline Image Slideshow for 7.5 inch V2 E-Paper
+ *
+ * Displays 5 pre-loaded images in rotation, switching every 30 seconds.
+ * No WiFi or WebServer required - pure standalone operation.
+ */
 
-//const char* ssid = "Waveshare";
-//const char* password = "password";
-//const char* ssid = "TheHome";
-//const char* password = "qq330447168";
-const char *ssid = "JSBPI"; //"your ssid";
-const char *password = "waveshare0755";   //"your password";
-ESP8266WebServer server(80);
-IPAddress myIP;       // IP address in your local wifi net
+#include <pgmspace.h>
+#include "image1.h"
+#include "image2.h"
+#include "image3.h"
+#include "image4.h"
+#include "image5.h"
+#include "epd_minimal.h"
 
-void setup(void) {
+// Image information structure
+struct ImageInfo {
+    const uint8_t* data;
+    size_t size;
+};
 
-  Serial.begin(115200);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
+// Image array (5 images) - stored in Flash
+const ImageInfo images[] = {
+    {image1_data, 96000},
+    {image2_data, 96000},
+    {image3_data, 96000},
+    {image4_data, 96000},
+    {image5_data, 96000},
+};
+const int IMAGE_COUNT = 5;
 
-  //Static IP setting---by Lin
-  wifi_station_dhcpc_stop();
-  struct ip_info info;
-  IP4_ADDR(&info.ip, 192, 168, 10, 211);
-  IP4_ADDR(&info.gw, 192, 168, 10, 1);
-  IP4_ADDR(&info.netmask, 255, 255, 255, 0);
-  wifi_set_ip_info(STATION_IF, &info);
-
-
-  // Connect to WiFi network
-  Serial.println("");
-  Serial.println("");
-  Serial.print("Connected to ");
-  Serial.println(ssid);
-
-  // SPI initialization
-  pinMode(PIN_SPI_SCK, OUTPUT);
-  pinMode(PIN_SPI_DIN, OUTPUT);
-  pinMode(CS_PIN  , OUTPUT);
-  pinMode(RST_PIN , OUTPUT);
-  pinMode(DC_PIN  , OUTPUT);
-  pinMode(BUSY_PIN,  INPUT);
-//   SPI.begin();
-
-  // Wait for connection
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.print("\r\nIP address: ");
-  Serial.println(myIP = WiFi.localIP());
-
-  if (MDNS.begin("esp8266")) {
-    Serial.println("MDNS responder started");
-  }
-
-  server.on("/", handleRoot);
-  server.on("/styles.css", sendCSS);
-  server.on("/processingA.js", sendJS_A);
-  server.on("/processingB.js", sendJS_B);
-  server.on("/processingC.js", sendJS_C);
-  server.on("/processingD.js", sendJS_D);
-  server.on("/LOAD", EPD_Load);
-  server.on("/EPD", EPD_Init);
-  server.on("/NEXT", EPD_Next);
-  server.on("/SHOW", EPD_Show);
-  server.onNotFound(handleNotFound);
-
-  server.begin();
-  Serial.println("HTTP server started");
-}
-
-void loop(void) {
-  server.handleClient();
-}
-
-void EPD_Init()
-{
-  EPD_dispIndex = ((int)server.arg(0)[0] - 'a') +  (((int)server.arg(0)[1] - 'a') << 4);
-  // Print log message: initialization of e-Paper (e-Paper's type)
-  Serial.printf("EPD %s\r\n", EPD_dispMass[EPD_dispIndex].title);
-
-  // Initialization
-  EPD_dispInit();
-  server.send(200, "text/plain", "Init ok\r\n");
-}
-
-void EPD_Load()
-{
-  //server.arg(0) = data+data.length+'LOAD'
-  String p = server.arg(0);
-  if (p.endsWith("LOAD")) {
-    int index = p.length() - 8;
-    int L = ((int)p[index] - 'a') + (((int)p[index + 1] - 'a') << 4) + (((int)p[index + 2] - 'a') << 8) + (((int)p[index + 3] - 'a') << 12);
-    if (L == (p.length() - 8)) {
-      Serial.println("LOAD");
-      // if there is loading function for current channel (black or red)
-      // Load data into the e-Paper
-      if (EPD_dispLoad != 0) EPD_dispLoad();
-    }
-  }
-  server.send(200, "text/plain", "Load ok\r\n");
-}
-
-void EPD_Next()
-{
-  Serial.println("NEXT");
-
-  // Instruction code for for writting data into
-  // e-Paper's memory
-  int code = EPD_dispMass[EPD_dispIndex].next;
-  if(EPD_dispIndex == 34)
-    {
-        if(flag == 0)
-            code = 0x26;
-        else
-            code = 0x13;
+// Display a single image
+void displayImage(int index) {
+    if (index < 0 || index >= IMAGE_COUNT) {
+        Serial.printf("Invalid image index: %d\n", index);
+        return;
     }
 
-  // If the instruction code isn't '-1', then...
-  if (code != -1)
-  {
-    // Do the selection of the next data channel
-    EPD_SendCommand(code);
-    delay(2);
-  }
-  // Setup the function for loading choosen channel's data
-  EPD_dispLoad = EPD_dispMass[EPD_dispIndex].chRd;
+    Serial.printf("Displaying image %d...\n", index + 1);
 
-  server.send(200, "text/plain", "Next ok\r\n");
+    // Initialize e-Paper
+    EPD_7in5_V2_init();
+
+    // Send image data
+    const uint8_t* data = images[index].data;
+    size_t size = images[index].size;
+
+    // Progress indicator
+    int progress = 0;
+    unsigned long startTime = millis();
+
+    for (size_t i = 0; i < size; i++) {
+        // Read from Flash using pgm_read_byte_near
+        EPD_SendData(pgm_read_byte_near(&data[i]));
+
+        // Print progress every 10%
+        if ((i * 10) / size > progress) {
+            progress = (i * 10) / size;
+            Serial.printf("%d%% ", progress * 10);
+        }
+    }
+    Serial.println("100%");
+
+    unsigned long elapsed = millis() - startTime;
+    Serial.printf("Transfer time: %lu ms\n", elapsed);
+
+    // Refresh display and enter sleep
+    EPD_7IN5_V2_Show();
+
+    Serial.printf("Image %d displayed successfully\n", index + 1);
 }
 
-void EPD_Show()
-{
-  Serial.println("\r\nSHOW\r\n");
-  // Show results and Sleep
-  EPD_dispMass[EPD_dispIndex].show();
-  server.send(200, "text/plain", "Show ok\r\n");
+void setup() {
+    Serial.begin(115200);
+    delay(1000);
+
+    Serial.println("\r\n=== ESPSlider Image Slideshow ===");
+    Serial.println("7.5 inch V2 E-Paper Display");
+    Serial.println("Images: 5");
+    Serial.println("Interval: 30 seconds");
+    Serial.println("====================================\r\n");
+
+    // Initialize SPI pins
+    pinMode(PIN_SPI_SCK, OUTPUT);
+    pinMode(PIN_SPI_DIN, OUTPUT);
+    pinMode(CS_PIN, OUTPUT);
+    pinMode(RST_PIN, OUTPUT);
+    pinMode(DC_PIN, OUTPUT);
+    pinMode(BUSY_PIN, INPUT);
+
+    // Display first image
+    displayImage(0);
+    Serial.println("\r\nReady. Starting slideshow...\r\n");
 }
 
-void handleNotFound() {
-  String message = "File Not Found\n\n";
-  message += "URI: ";
-  message += server.uri();
-  message += "\nMethod: ";
-  message += (server.method() == HTTP_GET) ? "GET" : "POST";
-  message += "\nArguments: ";
-  message += server.args();
-  message += "\n";
-  for (uint8_t i = 0; i < server.args(); i++) {
-    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
-  }
-  server.send(200, "text/plain", message);
-  Serial.print("Unknown URI: ");
-  Serial.println(server.uri());
+void loop() {
+    static unsigned long lastChange = 0;
+    static int currentImage = 0;
+
+    // Check if it's time to switch images
+    if (millis() - lastChange >= 30000) {  // 30 seconds
+        currentImage = (currentImage + 1) % IMAGE_COUNT;
+        displayImage(currentImage);
+        lastChange = millis();
+        Serial.println();
+    }
 }
