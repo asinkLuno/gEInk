@@ -10,9 +10,11 @@
 import os
 import sys
 from collections import Counter
+from pathlib import Path
 from typing import Tuple
 
-from PIL import Image
+import cv2
+import numpy as np
 
 # 支持的图片格式
 SUPPORTED_FORMATS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
@@ -55,104 +57,234 @@ def process_directory(input_dir: str):
         print()
 
 
-def get_background_color(img):
-    """获取图片的背景色（取四个角的颜色，取众数）"""
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-    width, height = img.size
+def get_background_color(img: np.ndarray) -> Tuple[int, int, int]:
+    """
+    获取图片的背景色（取四个角的颜色，取众数），输入为OpenCV图片。
+    Args:
+        img: OpenCV图片 (numpy.ndarray)
+    Returns:
+        背景色 (B, G, R)
+    """
+    height, width, _ = img.shape
 
     corners = [
-        img.getpixel((0, 0)),
-        img.getpixel((width - 1, 0)),
-        img.getpixel((0, height - 1)),
-        img.getpixel((width - 1, height - 1)),
+        tuple(img[0, 0].tolist()),
+        tuple(img[0, width - 1].tolist()),
+        tuple(img[height - 1, 0].tolist()),
+        tuple(img[height - 1, width - 1].tolist()),
     ]
     return Counter(corners).most_common(1)[0][0]
 
 
-def detect_object_bounds(img, threshold=240) -> Tuple[int, int, int, int]:
-    """检测物体边界"""
-    width, height = img.size
+def is_solid_background(img: np.ndarray, tolerance: int = 30) -> bool:
+    """
+    检查图片背景是否是纯色。
+    通过检查图片边缘像素的颜色方差来判断。
+    Args:
+        img: OpenCV图片 (numpy.ndarray)
+        tolerance: 颜色容差，值越大，对“纯色”的定义越宽松
+    Returns:
+        如果背景是纯色，则返回True，否则返回False
+    """
+    height, width, _ = img.shape
+
+    # 提取边缘像素
+    border_pixels = []
+    # 上下边缘
+    for x in range(width):
+        border_pixels.append(img[0, x])
+        border_pixels.append(img[height - 1, x])
+    # 左右边缘
+    for y in range(height):
+        border_pixels.append(img[y, 0])
+        border_pixels.append(img[y, width - 1])
+
+    # 将像素列表转换为Numpy数组
+    border_pixels = np.array(border_pixels)
+
+    if len(border_pixels) == 0:
+        return True  # 没有像素，视为纯色
+
+    # 计算颜色方差
+    # 计算每个通道的平均值
+    avg_color = np.mean(border_pixels, axis=0)
+
+    # 计算每个通道与平均值的差的平方，然后求和，再求平均值
+    # 这实际上是计算每个通道的方差，然后将这些方差相加
+    color_variance = np.mean(np.sum((border_pixels - avg_color) ** 2, axis=1))
+
+    # 判断是否为纯色
+    # 如果颜色方差小于容差，则认为是纯色背景
+    return color_variance < tolerance
+
+
+def detect_object_bounds(
+    img: np.ndarray, threshold: int = 240
+) -> Tuple[int, int, int, int]:
+    """
+    检测物体边界，输入为OpenCV图片。
+    Args:
+        img: OpenCV图片 (numpy.ndarray)
+        threshold: 阈值，用于判断像素是否为背景
+    Returns:
+        物体的边界 (left, right, top, bottom)
+    """
+    height, width, _ = img.shape
     bg_color = get_background_color(img)
 
     left, right, top, bottom = width, 0, height, 0
 
     for y in range(height):
         for x in range(width):
-            pixel = img.getpixel((x, y))
-            r1, g1, b1 = pixel[:3] if len(pixel) >= 3 else (pixel[0],) * 3
-            r2, g2, b2 = bg_color[:3]
-            distance = ((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2) ** 0.5
+            pixel = img[y, x]  # BGR
+            # Calculate Euclidean distance in BGR space
+            distance = np.sqrt(np.sum((pixel - np.array(bg_color)) ** 2))
 
-            if distance >= (255 - threshold):
+            if distance >= (
+                255 - threshold
+            ):  # Using 255 - threshold to maintain original logic's sensitivity
                 left = min(left, x)
                 right = max(right, x)
                 top = min(top, y)
                 bottom = max(bottom, y)
 
-    if left == width:
+    if left == width:  # No object detected, return full image bounds
         return 0, width, 0, height
 
     padding = 5
     return (
         max(0, left - padding),
-        min(width, right + padding),
+        min(width, right + 1 + padding),  # right is exclusive, so +1
         max(0, top - padding),
-        min(height, bottom + padding),
+        min(height, bottom + 1 + padding),  # bottom is exclusive, so +1
     )
 
 
-def pad_to_ratio(img):
-    """Padding图片到指定比例"""
-    width, height = img.size
+def crop_to_target_ratio(img: np.ndarray, target_ratio: float) -> np.ndarray:
+    """
+    将图片裁剪到目标比例，尽量保持中心内容，输入为OpenCV图片。
+    Args:
+        img: OpenCV图片 (numpy.ndarray)
+        target_ratio: 目标宽高比 (e.g., 5/3 或 3/5)
+    Returns:
+        裁剪后的OpenCV图片 (numpy.ndarray)
+    """
+    height, width, _ = img.shape
+    current_ratio = width / height
+
+    if abs(current_ratio - target_ratio) < 0.01:  # 已经接近目标比例
+        return img
+
+    if current_ratio > target_ratio:  # 当前图像太宽，需要减小宽度
+        new_width = int(height * target_ratio)
+        left = (width - new_width) // 2
+        right = left + new_width
+        top = 0
+        bottom = height
+    else:  # 当前图像太高，需要减小高度
+        new_height = int(width / target_ratio)
+        top = (height - new_height) // 2
+        bottom = top + new_height
+        left = 0
+        right = width
+
+    return img[top:bottom, left:right]
+
+
+def pad_to_ratio(img: np.ndarray) -> np.ndarray:
+    """
+    Padding图片到指定比例，输入为OpenCV图片。
+    Args:
+        img: OpenCV图片 (numpy.ndarray)
+    Returns:
+        Padding后的OpenCV图片 (numpy.ndarray)
+    """
+    height, width, _ = img.shape
     ratio = 5 / 3 if width >= height else 3 / 5
     current_ratio = width / height
 
     if abs(current_ratio - ratio) < 0.01:
         return img
 
+    bg_color = get_background_color(img)
+    pad_top, pad_bottom, pad_left, pad_right = 0, 0, 0, 0
+
     if current_ratio > ratio:
         new_height = int(width / ratio)
         pad_top = (new_height - height) // 2
-        new_img = Image.new("RGB", (width, new_height), get_background_color(img))
-        new_img.paste(img, (0, pad_top))
+        pad_bottom = new_height - height - pad_top
     else:
         new_width = int(height * ratio)
         pad_left = (new_width - width) // 2
-        new_img = Image.new("RGB", (new_width, height), get_background_color(img))
-        new_img.paste(img, (pad_left, 0))
+        pad_right = new_width - width - pad_left
 
-    return new_img
+    padded_img = cv2.copyMakeBorder(
+        img,
+        pad_top,
+        pad_bottom,
+        pad_left,
+        pad_right,
+        cv2.BORDER_CONSTANT,
+        value=bg_color,
+    )
+    return padded_img
 
 
-def resize_to_target(img):
-    """Resize图片到目标尺寸"""
-    width, height = img.size
+def resize_to_target(img: np.ndarray) -> np.ndarray:
+    """
+    Resize图片到目标尺寸，输入为OpenCV图片。
+    Args:
+        img: OpenCV图片 (numpy.ndarray)
+    Returns:
+        Resize后的OpenCV图片 (numpy.ndarray)
+    """
+    height, width, _ = img.shape
     if width > height:
-        return img.resize((SCREEN_LONG, SCREEN_SHORT), Image.Resampling.LANCZOS)
-    return img.resize((SCREEN_SHORT, SCREEN_LONG), Image.Resampling.LANCZOS)
+        return cv2.resize(
+            img, (SCREEN_LONG, SCREEN_SHORT), interpolation=cv2.INTER_LANCZOS4
+        )
+    return cv2.resize(
+        img, (SCREEN_SHORT, SCREEN_LONG), interpolation=cv2.INTER_LANCZOS4
+    )
 
 
-def process_image(input_path, output_path):
-    """完整的图片处理流程"""
-    img = Image.open(input_path)
-    print(f"原始尺寸: {img.size}")
+def process_image(input_path: str, output_path: str):
+    """
+    完整的图片处理流程，全程使用OpenCV。
+    Args:
+        input_path: 输入图片路径
+        output_path: 输出图片路径
+    """
+    img = cv2.imread(input_path)
+    if img is None:
+        print(f"错误: 无法读取图片 {input_path}")
+        return
+
+    print(f"原始尺寸: {img.shape[1]}x{img.shape[0]}")  # width x height
 
     # 1. 检测并裁切物体
     left, right, top, bottom = detect_object_bounds(img)
-    cropped = img.crop((left, top, right, bottom))
-    print(f"裁切后尺寸: {cropped.size}")
+    cropped = img[top:bottom, left:right]
+    print(f"裁切后尺寸: {cropped.shape[1]}x{cropped.shape[0]}")  # width x height
 
-    # 2. Padding到5:3或3:5比例
-    padded = pad_to_ratio(cropped)
-    print(f"Padding后尺寸: {padded.size}")
+    # 2. 根据背景类型决定Padding或按比例裁剪
+    if is_solid_background(cropped):
+        print("背景为纯色，进行Padding到指定比例...")
+        padded = pad_to_ratio(cropped)
+    else:
+        print("背景不为纯色，尽量裁剪到5:3/3:5比例...")
+        height, width, _ = cropped.shape
+        target_ratio = 5 / 3 if width >= height else 3 / 5
+        padded = crop_to_target_ratio(cropped, target_ratio)
+
+    print(f"处理后尺寸: {padded.shape[1]}x{padded.shape[0]}")  # width x height
 
     # 3. Resize到目标尺寸
     final = resize_to_target(padded)
-    print(f"最终尺寸: {final.size}")
+    print(f"最终尺寸: {final.shape[1]}x{final.shape[0]}")  # width x height
 
     # 保存结果
-    final.save(output_path)
+    cv2.imwrite(output_path, final)
     print(f"已保存到: {output_path}")
 
     return final
