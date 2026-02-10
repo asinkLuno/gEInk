@@ -203,7 +203,9 @@ def resize_to_target(img: np.ndarray, target_width, target_height):
         height, width = width, height  # 交换尺寸
 
     # Resize 到目标尺寸
-    return cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_LANCZOS4)
+    return cv2.resize(
+        img, (target_width, target_height), interpolation=cv2.INTER_LANCZOS4
+    )
 
 
 def _preprocess_image(

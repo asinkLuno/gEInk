@@ -182,7 +182,12 @@ def convert_bin_to_c_array(
 
 def get_dithered_files(directory: Path) -> list[Path]:
     """Get all _dithered image files in a directory."""
-    return [f for f in directory.iterdir() if "_dithered" in f.name and f.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp"}]
+    return [
+        f
+        for f in directory.iterdir()
+        if "_dithered" in f.name
+        and f.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp"}
+    ]
 
 
 def convert_folder(
@@ -229,9 +234,7 @@ def convert_folder(
             if espslider_path:
                 array_name = f"image{idx}_data"
                 header_file = espslider_path / f"image{idx}.h"
-                convert_bin_to_c_array(
-                    str(bin_file), array_name, str(header_file)
-                )
+                convert_bin_to_c_array(str(bin_file), array_name, str(header_file))
 
     logger.success(f"Converted {count}/{len(dithered_files)} images in {input_path}")
     if espslider_path:

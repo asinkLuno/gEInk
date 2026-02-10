@@ -9,7 +9,8 @@ logger.remove()
 logger.add(lambda msg: print(msg, end=""), format="{message}")
 
 from .config import COLOR_LEVELS, TARGET_HEIGHT, TARGET_WIDTH
-from .convert_toolkit import convert_folder, convert_png_to_bin, convert_bin_to_c_array
+from .convert_toolkit import (convert_bin_to_c_array, convert_folder,
+                              convert_png_to_bin)
 from .dithering_toolkit import apply_dithering
 from .preprocess_toolkit import _preprocess_image
 
@@ -136,8 +137,12 @@ def convert(input_path, output_path, width, height, color_levels, espslider_dir)
 
     else:
         count = convert_folder(
-            input_path, output_path, width, height, color_levels,
-            espslider_dir=espslider_dir
+            input_path,
+            output_path,
+            width,
+            height,
+            color_levels,
+            espslider_dir=espslider_dir,
         )
         if count == 0:
             logger.error("No files converted.")
