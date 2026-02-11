@@ -158,7 +158,7 @@ def convert(input_path, output_path, width, height, color_levels, espslider_dir)
 @click.option(
     "--method",
     "-m",
-    type=click.Choice(["floyd_steinberg", "jarvis_judice_ninke"]),
+    type=click.Choice(["floyd_steinberg", "jarvis_judice_ninke", "stucki"]),
     default="floyd_steinberg",
     help="Dithering algorithm to use",
 )

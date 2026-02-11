@@ -92,7 +92,7 @@ geink convert output_dithered.png output.bin --width 800 --height 480 --color-le
 | `INPUT_PATH` | (必填) | 输入灰度图片文件路径 |
 | `OUTPUT_PATH` | (必填) | 输出抖动后的图片文件路径 |
 | `--method` / `-m` | `floyd_steinberg` | 抖动算法 |
-| `--color-levels` / `-c` | `4` (来自 `config.py`) | 抖动后的颜色级别数 (2 的幂次) |
+| `--color-levels` / `-c` | `2` (来自 `config.py`) | 抖动后的颜色级别数 (2 的幂次) |
 
 ### `geink convert` 参数
 
@@ -102,12 +102,14 @@ geink convert output_dithered.png output.bin --width 800 --height 480 --color-le
 | `OUTPUT_PATH` | (必填) | 输出 EPD 原始二进制文件路径 |
 | `--width` / `-w` | `800` (来自 `config.py`) | 目标宽度 |
 | `--height` / `-h` | `480` (来自 `config.py`) | 目标高度 |
-| `--color-levels` / `-c` | `4` (来自 `config.py`) | 输入图片使用的颜色级别数 (2 的幂次) |
+| `--color-levels` / `-c` | `2` (来自 `config.py`) | 输入图片使用的颜色级别数 (2 的幂次) |
+| `--espslider-dir` | `ESPSlider/` | ESPSlider 目录，自动生成 .h 头文件 |
 
 ### 支持的抖动算法 (`--method` 参数)
 
-- `floyd_steinberg`: Floyd-Steinberg（默认，速度快）
-- `jarvis_judice_ninke`: Jarvis, Judice, Ninke（质量更高，扩散更均匀）
+- `floyd_steinberg`: Floyd-Steinberg（默认，速度快，扩散到相邻 4 像素）
+- `jarvis_judice_ninke`: Jarvis, Judice, Ninke（质量更高，扩散到相邻 12 像素）
+- `stucki`: Stucki（JNN 变体，产生更平滑的结果）
 
 ## 输出格式
 
