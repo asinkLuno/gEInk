@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from loguru import logger
+from numba import jit
 
 from .config import TARGET_HEIGHT, TARGET_WIDTH
 
@@ -63,42 +64,61 @@ def is_solid_background(img: np.ndarray, tolerance: int = 30):
     return color_variance < tolerance
 
 
-def detect_object_bounds(img: np.ndarray, threshold: int = 240):
+@jit(nopython=True)
+def detect_object_bounds(img: np.ndarray, bg_color: np.ndarray, threshold: int = 240):
     """
     检测物体边界，输入为OpenCV图片。
     Args:
         img: OpenCV图片 (numpy.ndarray)
+        bg_color: 背景色 (B, G, R) as numpy array
         threshold: 阈值，用于判断像素是否为背景
     Returns:
-        物体的边界 (left, right, top, bottom)
+        (left, right, top, bottom) - 物体的边界
     """
     height, width, _ = img.shape
-    bg_color = get_background_color(img)
 
     left, right, top, bottom = width, 0, height, 0
+    threshold_sq = (255 - threshold) ** 2
 
     for y in range(height):
         for x in range(width):
             pixel = img[y, x]  # BGR
-            # Calculate Euclidean distance in BGR space
-            distance = np.sqrt(np.sum((pixel - np.array(bg_color)) ** 2))
+            # Calculate squared Euclidean distance in BGR space (avoid sqrt for speed)
+            dist_sq = (
+                (pixel[0] - bg_color[0]) ** 2
+                + (pixel[1] - bg_color[1]) ** 2
+                + (pixel[2] - bg_color[2]) ** 2
+            )
 
-            if distance >= (255 - threshold):
-                left = min(left, x)
-                right = max(right, x)
-                top = min(top, y)
-                bottom = max(bottom, y)
+            if dist_sq >= threshold_sq:
+                if x < left:
+                    left = x
+                if x > right:
+                    right = x
+                if y < top:
+                    top = y
+                if y > bottom:
+                    bottom = y
 
     if left == width:  # No object detected, return full image bounds
         return 0, width, 0, height
 
     padding = 5
-    return (
-        max(0, left - padding),
-        min(width, right + 1 + padding),  # right is exclusive, so +1
-        max(0, top - padding),
-        min(height, bottom + 1 + padding),  # bottom is exclusive, so +1
-    )
+    left = left - padding
+    right = right + 1 + padding
+    top = top - padding
+    bottom = bottom + 1 + padding
+
+    if left < 0:
+        left = 0
+    if right > width:
+        right = width
+    if top < 0:
+        top = 0
+    if bottom > height:
+        bottom = height
+
+    return left, right, top, bottom
 
 
 def crop_to_target_ratio(img: np.ndarray, target_ratio: float):
@@ -229,7 +249,8 @@ def _preprocess_image(
     logger.info(f"原始尺寸: {img.shape[1]}x{img.shape[0]}")
 
     # 1. 检测并裁切物体
-    left, right, top, bottom = detect_object_bounds(img)
+    bg_color = np.array(get_background_color(img))
+    left, right, top, bottom = detect_object_bounds(img, bg_color)
     cropped = img[top:bottom, left:right]
     logger.info(f"裁切后尺寸: {cropped.shape[1]}x{cropped.shape[0]}")
 
