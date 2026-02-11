@@ -36,7 +36,9 @@ def process_single_image(input_path, output_path, processor_func):
     return False
 
 
-def _run_command(input_path, output_path, processor_func, make_output_path, skip_patterns=None):
+def _run_command(
+    input_path, output_path, processor_func, make_output_path, skip_patterns=None
+):
     """Run a command on a single file or all images in a directory.
 
     Args:
@@ -82,13 +84,22 @@ def preprocess(input_path, output_path):
     """
     Preprocesses an image or all images in a directory.
     """
+
     def make_output(input_path_obj):
-        return input_path_obj.with_name(f"{input_path_obj.stem}_crop{input_path_obj.suffix}")
+        return input_path_obj.with_name(
+            f"{input_path_obj.stem}_crop{input_path_obj.suffix}"
+        )
 
     def processor(img_path):
         return _preprocess_image(img_path, TARGET_WIDTH, TARGET_HEIGHT)
 
-    _run_command(input_path, output_path, processor, make_output, skip_patterns=["_crop", "_dithered"])
+    _run_command(
+        input_path,
+        output_path,
+        processor,
+        make_output,
+        skip_patterns=["_crop", "_dithered"],
+    )
 
 
 @cli.command()
