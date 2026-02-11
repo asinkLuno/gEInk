@@ -6,28 +6,8 @@
  */
 
 #include <pgmspace.h>
-#include "image1.h"
-#include "image2.h"
-#include "image3.h"
-#include "image4.h"
-#include "image5.h"
+#include "images.h"
 #include "epd_minimal.h"
-
-// Image information structure
-struct ImageInfo {
-    const uint8_t* data;
-    size_t size;
-};
-
-// Image array (5 images) - stored in Flash
-const ImageInfo images[] = {
-    {image1_data, 48000},
-    {image2_data, 48000},
-    {image3_data, 48000},
-    {image4_data, 48000},
-    {image5_data, 48000},
-};
-const int IMAGE_COUNT = 5;
 
 // Display a single image
 void displayImage(int index) {
@@ -76,7 +56,7 @@ void setup() {
 
     Serial.println("\r\n=== ESPSlider Image Slideshow ===");
     Serial.println("7.5 inch V2 E-Paper Display");
-    Serial.println("Images: 5");
+    Serial.printf("Images: %d\n", IMAGE_COUNT);
     Serial.println("Interval: 30 seconds");
     Serial.println("====================================\r\n");
 

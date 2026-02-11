@@ -180,6 +180,68 @@ def convert_bin_to_c_array(
     return True
 
 
+def generate_images_header(
+    espslider_dir: str,
+    image_count: int,
+    image_size: int,
+) -> bool:
+    """
+    Generate images.h with dynamic image count.
+
+    Args:
+        espslider_dir: Path to ESPSlider directory
+        image_count: Number of images converted
+        image_size: Size of each image in bytes
+
+    Returns:
+        True if successful, False otherwise
+    """
+    espslider_path = Path(espslider_dir)
+
+    lines = []
+    lines.append("#ifndef IMAGES_H")
+    lines.append("#define IMAGES_H")
+    lines.append("")
+    lines.append("#include <stdint.h>")
+    lines.append("#include <pgmspace.h>")
+    lines.append("")
+    lines.append(f"// Auto-generated: {image_count} images, {image_size} bytes each")
+    lines.append(f"#define IMAGE_COUNT {image_count}")
+    lines.append(f"#define IMAGE_SIZE {image_size}")
+    lines.append("")
+
+    # Include all individual header files
+    for i in range(1, image_count + 1):
+        lines.append(f'#include "image{i}.h"')
+    lines.append("")
+
+    # Image information structure
+    lines.append("// Image information structure")
+    lines.append("struct ImageInfo {")
+    lines.append("    const uint8_t* data;")
+    lines.append("    size_t size;")
+    lines.append("};")
+    lines.append("")
+
+    # Image array - stored in Flash
+    lines.append("// Image array - stored in Flash")
+    lines.append("const ImageInfo images[IMAGE_COUNT] PROGMEM = {")
+    for i in range(1, image_count + 1):
+        lines.append(f"    {{image{i}_data, IMAGE_SIZE}},")
+    lines.append("};")
+    lines.append("")
+    lines.append("#endif // IMAGES_H")
+
+    output_file = espslider_path / "images.h"
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(output_file, "w") as f:
+        f.write("\n".join(lines))
+
+    logger.success(f"Generated {output_file}")
+    return True
+
+
 def get_dithered_files(directory: Path) -> list[Path]:
     """Get all _dithered image files in a directory."""
     return [
@@ -223,18 +285,24 @@ def convert_folder(
         return 0
 
     count = 0
+    image_size = 0
     for idx, img_file in enumerate(dithered_files, start=1):
         bin_file = output_path / f"{img_file.stem.replace('_dithered', '')}.bin"
         if convert_png_to_bin(
             str(img_file), str(bin_file), width, height, color_levels
         ):
             count += 1
+            image_size = bin_file.stat().st_size if bin_file.exists() else 0
 
             # Generate ESPSlider .h file
             if espslider_path:
                 array_name = f"image{idx}_data"
                 header_file = espslider_path / f"image{idx}.h"
                 convert_bin_to_c_array(str(bin_file), array_name, str(header_file))
+
+    # Generate images.h with dynamic count
+    if espslider_path and count > 0:
+        generate_images_header(str(espslider_path), count, image_size)
 
     logger.success(f"Converted {count}/{len(dithered_files)} images in {input_path}")
     if espslider_path:
