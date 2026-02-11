@@ -28,19 +28,44 @@ def process_single_image(input_path, output_path, processor_func):
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             cv2.imwrite(output_path, processed_img)
             logger.success(f"Saved: {output_path}")
+            return True
         except Exception as e:
             logger.error(f"Error saving {output_path}: {e}")
-        return True
     else:
         logger.error(f"Failed to process {input_path}")
-        return False
+    return False
 
 
-def get_image_files(directory):
-    """Get all image files in a directory."""
-    return [
-        f for f in Path(directory).iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS
-    ]
+def _run_command(input_path, output_path, processor_func, make_output_path, skip_patterns=None):
+    """Run a command on a single file or all images in a directory.
+
+    Args:
+        input_path: Input file path or directory path
+        output_path: Output file path (optional for files, None for directories)
+        processor_func: Function that takes input path and returns processed image
+        make_output_path: Function that takes input Path and returns output Path
+        skip_patterns: List of patterns to skip (e.g., ['_crop', '_dithered'])
+    """
+    input_obj = Path(input_path)
+    skip_patterns = skip_patterns or []
+
+    if input_obj.is_file():
+        output = output_path or str(make_output_path(input_obj))
+        success = process_single_image(input_path, output, processor_func)
+        if not success:
+            logger.error("Processing failed.")
+    else:
+        input_dir = input_obj
+        count = 0
+        for img_file in input_dir.iterdir():
+            if img_file.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+            if any(p in img_file.name for p in skip_patterns):
+                continue
+            output = str(make_output_path(img_file))
+            if process_single_image(str(img_file), output, processor_func):
+                count += 1
+        logger.success(f"Processed {count} images in {input_dir}")
 
 
 @click.group()
@@ -57,41 +82,13 @@ def preprocess(input_path, output_path):
     """
     Preprocesses an image or all images in a directory.
     """
-    input_path_obj = Path(input_path)
-    if input_path_obj.is_file():
-        output_path = output_path or str(
-            input_path_obj.with_name(
-                f"{input_path_obj.stem}_crop{input_path_obj.suffix}"
-            )
-        )
-        processed_img = _preprocess_image(input_path, TARGET_WIDTH, TARGET_HEIGHT)
+    def make_output(input_path_obj):
+        return input_path_obj.with_name(f"{input_path_obj.stem}_crop{input_path_obj.suffix}")
 
-        if processed_img is not None:
-            try:
-                cv2.imwrite(output_path, processed_img)
-                logger.success(f"Successfully preprocessed and saved to {output_path}")
-            except Exception as e:
-                logger.error(f"Error saving preprocessed image to {output_path}: {e}")
-        else:
-            logger.error("Preprocessing failed.")
+    def processor(img_path):
+        return _preprocess_image(img_path, TARGET_WIDTH, TARGET_HEIGHT)
 
-    else:
-        input_dir = Path(input_path)
-
-        image_files = [
-            f
-            for f in get_image_files(input_dir)
-            if "_crop" not in f.name and "_dithered" not in f.name
-        ]
-
-        count = 0
-        for img_file in image_files:
-            output_file = img_file.with_name(f"{img_file.stem}_crop{img_file.suffix}")
-
-            if process_single_image(str(img_file), str(output_file), _preprocess_image):
-                count += 1
-
-        logger.success(f"Processed {count} images in {input_dir}")
+    _run_command(input_path, output_path, processor, make_output, skip_patterns=["_crop", "_dithered"])
 
 
 @cli.command()
@@ -169,48 +166,19 @@ def dither(input_path, output_path, method):
     Use --method/-m to choose the dithering algorithm.
     """
 
-    def dither_processor(img_path):
+    def make_output(input_path_obj):
+        return input_path_obj.with_name(
+            input_path_obj.stem.replace("_crop", "_dithered") + input_path_obj.suffix
+        )
+
+    def processor(img_path):
         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         if img is None:
             logger.error(f"Error: Cannot read image '{img_path}'.")
             return None
         return apply_dithering(img, method, COLOR_LEVELS)
 
-    input_path_obj = Path(input_path)
-    if input_path_obj.is_file():
-        if output_path is None:
-            output_path = str(
-                input_path_obj.with_name(
-                    input_path_obj.stem.replace("_crop", "_dithered")
-                    + input_path_obj.suffix
-                )
-            )
-        dithered_img = dither_processor(input_path)
-
-        if dithered_img is not None:
-            try:
-                cv2.imwrite(output_path, dithered_img)
-                logger.success(f"Successfully dithered and saved to {output_path}")
-            except Exception as e:
-                logger.error(f"Error saving dithered image to {output_path}: {e}")
-        else:
-            logger.error("Dithering failed.")
-
-    else:
-        input_dir = Path(input_path)
-
-        crop_files = [f for f in input_dir.iterdir() if "_crop" in f.name]
-
-        count = 0
-        for img_file in crop_files:
-            output_file = img_file.with_name(
-                img_file.stem.replace("_crop", "_dithered") + img_file.suffix
-            )
-
-            if process_single_image(str(img_file), str(output_file), dither_processor):
-                count += 1
-
-        logger.success(f"Dithered {count} images in {input_dir}")
+    _run_command(input_path, output_path, processor, make_output)
 
 
 if __name__ == "__main__":
