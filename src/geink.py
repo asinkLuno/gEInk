@@ -37,7 +37,12 @@ def process_single_image(input_path, output_path, processor_func):
 
 
 def _run_command(
-    input_path, output_path, processor_func, make_output_path, skip_patterns=None
+    input_path,
+    output_path,
+    processor_func,
+    make_output_path,
+    skip_patterns=None,
+    require_patterns=None,
 ):
     """Run a command on a single file or all images in a directory.
 
@@ -47,11 +52,18 @@ def _run_command(
         processor_func: Function that takes input path and returns processed image
         make_output_path: Function that takes input Path and returns output Path
         skip_patterns: List of patterns to skip (e.g., ['_crop', '_dithered'])
+        require_patterns: List of patterns that files must match (e.g., ['_crop'])
     """
     input_obj = Path(input_path)
     skip_patterns = skip_patterns or []
+    require_patterns = require_patterns or []
 
     if input_obj.is_file():
+        if require_patterns and not any(p in input_obj.name for p in require_patterns):
+            logger.warning(
+                f"Skipping {input_obj.name}: does not match required patterns {require_patterns}"
+            )
+            return
         output = output_path or str(make_output_path(input_obj))
         success = process_single_image(input_path, output, processor_func)
         if not success:
@@ -63,6 +75,10 @@ def _run_command(
             if img_file.suffix.lower() not in IMAGE_EXTENSIONS:
                 continue
             if any(p in img_file.name for p in skip_patterns):
+                continue
+            if require_patterns and not any(
+                p in img_file.name for p in require_patterns
+            ):
                 continue
             output = str(make_output_path(img_file))
             if process_single_image(str(img_file), output, processor_func):
@@ -189,7 +205,9 @@ def dither(input_path, output_path, method):
             return None
         return apply_dithering(img, method, COLOR_LEVELS)
 
-    _run_command(input_path, output_path, processor, make_output)
+    _run_command(
+        input_path, output_path, processor, make_output, require_patterns=["_crop"]
+    )
 
 
 if __name__ == "__main__":
