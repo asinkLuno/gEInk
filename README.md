@@ -54,58 +54,65 @@ pip install -e ".[dev]"
 `geink` 是一个命令行工具，通过子命令进行操作。
 
 ### 1. 图像预处理 (`preprocess`)
-将图片预处理到目标尺寸。
+将图片预处理到目标尺寸。支持单个文件或目录批量处理。
 
 ```bash
-geink preprocess path/to/image.jpg output_preprocessed.png --width 800 --height 480
+# 处理单个文件（输出路径可选，自动生成 _crop 后缀）
+geink preprocess path/to/image.jpg [output_preprocessed.png]
+
+# 批量处理目录下所有图片
+geink preprocess path/to/images/
 ```
 
 ### 2. 图像抖动 (`dither`)
-对预处理后的图片进行抖动处理，生成多级灰度图像。
+对预处理后的图片进行抖动处理。支持单个文件或批量处理 `_crop` 图片。
 
 ```bash
-geink dither output_preprocessed.png output_dithered.png --method floyd_steinberg --color-levels 4
+# 处理单个文件（输出路径可选，自动生成 _dithered 后缀）
+geink dither path/to/image_crop.png [output_dithered.png]
+
+# 批量处理目录下所有 _crop 图片
+geink dither path/to/images/
 ```
 
 ### 3. 转换为 EPD 格式 (`convert`)
 将抖动后的图片转换为 EPD 原始二进制格式。
 
 ```bash
-geink convert output_dithered.png output.bin --width 800 --height 480 --color-levels 4
+# 处理单个文件（输出路径可选，自动生成 .bin）
+geink convert path/to/image_dithered.png [output.bin]
+
+# 批量处理目录下所有 _dithered 图片
+geink convert path/to/images/
 ```
 
 ## 命令行参数
-
-`geink` 命令的参数是根据其子命令来定义的。
 
 ### `geink preprocess` 参数
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `INPUT_PATH` | (必填) | 输入图片文件路径 |
-| `OUTPUT_PATH` | (必填) | 输出图片文件路径 |
-| `--width` / `-w` | `800` (来自 `config.py`) | 目标宽度 |
-| `--height` / `-h` | `480` (来自 `config.py`) | 目标高度 |
+| `INPUT_PATH` | (必填) | 输入图片文件或目录 |
+| `OUTPUT_PATH` | (自动生成) | 输出图片文件路径，可选 |
 
 ### `geink dither` 参数
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `INPUT_PATH` | (必填) | 输入灰度图片文件路径 |
-| `OUTPUT_PATH` | (必填) | 输出抖动后的图片文件路径 |
+| `INPUT_PATH` | (必填) | 输入 `_crop` 图片文件或目录 |
+| `OUTPUT_PATH` | (自动生成) | 输出抖动后的图片文件路径，可选 |
 | `--method` / `-m` | `floyd_steinberg` | 抖动算法 |
-| `--color-levels` / `-c` | `2` (来自 `config.py`) | 抖动后的颜色级别数 (2 的幂次) |
 
 ### `geink convert` 参数
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `INPUT_PATH` | (必填) | 输入抖动后的图片文件路径 |
-| `OUTPUT_PATH` | (必填) | 输出 EPD 原始二进制文件路径 |
-| `--width` / `-w` | `800` (来自 `config.py`) | 目标宽度 |
-| `--height` / `-h` | `480` (来自 `config.py`) | 目标高度 |
-| `--color-levels` / `-c` | `2` (来自 `config.py`) | 输入图片使用的颜色级别数 (2 的幂次) |
-| `--espslider-dir` | `ESPSlider/` | ESPSlider 目录，自动生成 .h 头文件 |
+| `INPUT_PATH` | (必填) | 输入 `_dithered` 图片文件或目录 |
+| `OUTPUT_PATH` | (自动生成) | 输出 `.bin` 文件路径，可选 |
+| `--width` / `-w` | `800` | 目标宽度 |
+| `--height` / `-h` | `480` | 目标高度 |
+| `--color-levels` / `-c` | `2` | 颜色级别数 (2 的幂次) |
+| `--espslider-dir` | `ESPSlider/` | ESPSlider 目录，自动生成 `.h` 头文件 |
 
 ### 支持的抖动算法 (`--method` 参数)
 
@@ -115,10 +122,16 @@ geink convert output_dithered.png output.bin --width 800 --height 480 --color-le
 
 ## 输出格式
 
-输出为 `.bin` 原始二进制文件，每像素 1 bit，按行优先排列。
-文件大小计算：`width × height ÷ 8` bytes
+输出为 `.bin` 原始二进制文件，按行优先排列。每像素占用 `log2(color_levels)` 位：
 
-例如 800×480 的图片输出文件大小为 48,000 bytes。
+| 颜色级别 | 每像素位数 | 每字节像素数 | 800×480 文件大小 |
+|----------|-----------|--------------|------------------|
+| 2 (1-bit) | 1 bit | 8 pixels | 48,000 bytes |
+| 4 (2-bit) | 2 bits | 4 pixels | 96,000 bytes |
+| 8 (3-bit) | 3 bits | ~2.67 pixels | 144,000 bytes |
+| 16 (4-bit) | 4 bits | 2 pixels | 192,000 bytes |
+
+自动生成 `.h` 头文件供 ESPSlider 使用。
 
 ---
 
