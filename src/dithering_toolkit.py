@@ -145,6 +145,28 @@ def stucki_dithering(
     return _apply_error_diffusion(gray_img, STUCKI_KERNEL, color_levels)
 
 
+def binary_thresholding(
+    gray_img: np.ndarray, threshold: int = 128, color_levels: int = 2
+) -> np.ndarray:
+    """
+    对灰度图应用简单的二分阈值处理。
+    Args:
+        gray_img: 灰度 numpy.ndarray
+        threshold: 阈值 (0-255)
+        color_levels: 目标颜色等级，对于二分色彩固定为2
+    Returns:
+        二值化的 numpy.ndarray
+    """
+    logger.info(f"应用二分阈值处理，阈值为 {threshold}。")
+    if color_levels != 2:
+        logger.warning(f"二分阈值处理仅支持2个颜色级别，已自动忽略 color_levels 参数。")
+    # Make a copy to avoid modifying the original array
+    binary_img = gray_img.copy()
+    binary_img[binary_img <= threshold] = 0
+    binary_img[binary_img > threshold] = 255
+    return binary_img
+
+
 def apply_dithering(
     gray_img: np.ndarray,
     dither_method: str = "jarvis_judice_ninke",
@@ -154,7 +176,7 @@ def apply_dithering(
     对灰度图应用抖动算法。
     Args:
         gray_img: 灰度图
-        dither_method: 抖动方法，支持 "floyd_steinberg"、"jarvis_judice_ninke" 和 "stucki"
+        dither_method: 抖动方法，支持 "floyd_steinberg"、"jarvis_judice_ninke"、"stucki" 和 "binary_threshold"
         color_levels: 目标灰度色阶数量
     Returns:
         抖动后的灰度 numpy.ndarray
@@ -163,9 +185,15 @@ def apply_dithering(
         "floyd_steinberg": floyd_steinberg_dithering,
         "jarvis_judice_ninke": jarvis_judice_ninke_dithering,
         "stucki": stucki_dithering,
+        "binary_threshold": binary_thresholding,
     }
     if dither_method not in methods:
         raise ValueError(
             f"不支持的抖动方法: {dither_method}，可选方法: {list(methods.keys())}"
         )
+    # For binary_thresholding, we need to handle the arguments differently
+    if dither_method == "binary_threshold":
+        # The `binary_thresholding` function has a `threshold` argument, not `color_levels`
+        # We can pass a default threshold or modify this to parse it from somewhere
+        return methods[dither_method](gray_img)
     return methods[dither_method](gray_img, color_levels)

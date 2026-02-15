@@ -182,8 +182,10 @@ def convert(input_path, output_path, width, height, color_levels, espslider_dir)
 @click.option(
     "--method",
     "-m",
-    type=click.Choice(["floyd_steinberg", "jarvis_judice_ninke", "stucki"]),
-    default="floyd_steinberg",
+    type=click.Choice(
+        ["floyd_steinberg", "jarvis_judice_ninke", "stucki", "binary_threshold"]
+    ),
+    default="jarvis_judice_ninke",
     help="Dithering algorithm to use",
 )
 def dither(input_path, output_path, method):
