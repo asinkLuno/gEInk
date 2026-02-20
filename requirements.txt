@@ -1,7 +1,0 @@
-opencv-python
-loguru
-click
-setuptools
-wheel
-python-dotenv
-numba
