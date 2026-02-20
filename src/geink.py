@@ -12,6 +12,7 @@ from .config import COLOR_LEVELS, TARGET_HEIGHT, TARGET_WIDTH
 from .convert_toolkit import (convert_bin_to_c_array, convert_folder,
                               convert_png_to_bin)
 from .dithering_toolkit import apply_dithering
+from .grid_cutter import _grid_cut_image
 from .preprocess_toolkit import _preprocess_image
 
 # Supported image extensions
@@ -210,6 +211,34 @@ def dither(input_path, output_path, method):
     _run_command(
         input_path, output_path, processor, make_output, require_patterns=["_crop"]
     )
+
+
+@cli.command()
+@click.argument("input_path", type=click.Path(exists=True))
+@click.option("--rows", "-r", type=int, required=True, help="Number of rows")
+@click.option("--cols", "-c", type=int, required=True, help="Number of columns")
+def gridcut(input_path, rows, cols):
+    """
+    Cuts an image or all images in a directory into a grid.
+
+    Each image is split into rows × cols tiles.
+    Output files are saved in a subdirectory named after the image (without extension).
+    Example: input.jpg -> input/r0_c0.png, input/r0_c1.png, etc.
+    """
+    input_obj = Path(input_path)
+
+    if input_obj.is_file():
+        success = _grid_cut_image(input_path, rows, cols)
+        if not success:
+            logger.error("Grid cut failed.")
+    else:
+        count = 0
+        for img_file in input_obj.iterdir():
+            if img_file.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+            if _grid_cut_image(str(img_file), rows, cols):
+                count += 1
+        logger.success(f"Grid cut {count} images")
 
 
 if __name__ == "__main__":
