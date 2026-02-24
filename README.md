@@ -86,6 +86,20 @@ geink convert path/to/image_dithered.png [output.bin]
 geink convert path/to/images/
 ```
 
+### 4. 上传图像到设备 (`upload`)
+将 `.bin` 文件通过 HTTP 分块上传到 ESP8266 e-paper display。
+
+```bash
+# 上传 .bin 文件到设备
+geink upload path/to/image.bin --host 192.168.10.211
+
+# 简写形式
+geink upload path/to/image.bin -H 192.168.10.211
+
+# 自定义块大小（默认 1400 字符）
+geink upload path/to/image.bin -H 192.168.10.211 --chunk-size 2000
+```
+
 ## 命令行参数
 
 ### `geink preprocess` 参数
@@ -113,6 +127,14 @@ geink convert path/to/images/
 | `--height` / `-h` | `480` | 目标高度 |
 | `--color-levels` / `-c` | `2` | 颜色级别数 (2 的幂次) |
 | `--espslider-dir` | `ESPSlider/` | ESPSlider 目录，自动生成 `.h` 头文件 |
+
+### `geink upload` 参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `BIN_PATH` | (必填) | 输入 `.bin` 文件路径 |
+| `--host` / `-H` | (必填) | ESP8266 设备 IP 地址 |
+| `--chunk-size` / `-c` | `1400` | 每次上传的块大小（字符数） |
 
 ### 支持的抖动算法 (`--method` 参数)
 
@@ -179,3 +201,49 @@ minicom -D /dev/ttyUSB0 -b 115200
 | RAM (全局/静态) | 48,472 B | 80,192 B | 60% |
 | IRAM (指令内存) | 60,807 B | 65,536 B | 92% |
 | Flash (代码) | 304,024 B | 1,048,576 B | 28% |
+
+---
+
+## SimpleLoader 固件烧录
+
+SimpleLoader 是 ESPSlider 的轻量替代固件，专注于通过 HTTP 接收图像数据并显示。
+
+### 编译固件
+
+```bash
+# 进入项目目录
+cd SimpleLoader
+
+# 确保主文件名与目录名匹配（Arduino CLI 要求）
+mv SimpleLoader.ino SimpleLoader.cpp
+
+# 编译并传入 WiFi 凭证
+arduino-cli compile --fqbn esp8266:esp8266:generic \
+  --build-property "build.extra_flags=-DWIFI_SSID=\"your_ssid\" -DWIFI_PASSWORD=\"your_password\"" \
+  /home/guozr/CODE/gEInk/SimpleLoader
+```
+
+编译成功后会生成固件文件：
+- `/home/guozr/.cache/arduino/sketches/.../SimpleLoader.cpp.bin` - 烧录用固件
+
+### 烧录固件
+
+```bash
+# 通过串口烧录（需要先连接 USB 转串口模块）
+arduino-cli upload -p /dev/ttyUSB0 --fqbn esp8266:esp8266:generic /home/guozr/CODE/gEInk/SimpleLoader
+```
+
+### 使用方法
+
+1. 固件启动后会自动连接 WiFi
+2. 访问 http://<IP>/ 查看状态
+3. 初始化屏幕：`curl http://<IP>/init`
+4. 上传图像数据：`curl -X POST -d 'data=...' http://<IP>/upload`
+5. 显示图像：`curl http://<IP>/show`
+
+### 资源使用
+
+| 资源 | 使用量 | 总量 | 占比 |
+|------|--------|------|------|
+| RAM (全局/静态) | ~32 KB | 80 KB | ~40% |
+| Flash (代码) | ~280 KB | 1 MB | ~28% |
