@@ -12,9 +12,18 @@
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 
-// WiFi credentials - update these
-const char* ssid = "nerv_staff";
-const char* password = "Ss15971417971";
+// WiFi credentials - pass via build flags: -DWIFI_SSID=\"your_ssid\" -DWIFI_PASSWORD=\"your_password\"
+#ifdef WIFI_SSID
+const char* ssid = WIFI_SSID;
+#else
+const char* ssid = "";
+#endif
+
+#ifdef WIFI_PASSWORD
+const char* password = WIFI_PASSWORD;
+#else
+const char* password = "";
+#endif
 
 ESP8266WebServer server(80);
 IPAddress myIP;
