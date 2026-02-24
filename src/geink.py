@@ -15,6 +15,14 @@ from .dithering_toolkit import apply_dithering
 from .grid_cutter import _grid_cut_image
 from .preprocess_toolkit import _preprocess_image
 
+# Try to import requests, but handle gracefully if not installed
+try:
+    import requests
+
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+
 # Supported image extensions
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"}
 
@@ -239,6 +247,161 @@ def gridcut(input_path, rows, cols):
             if _grid_cut_image(str(img_file), rows, cols):
                 count += 1
         logger.success(f"Grid cut {count} images")
+
+
+@cli.command()
+@click.argument("bin_path", type=click.Path(exists=True))
+@click.option(
+    "--host",
+    "-H",
+    required=True,
+    help="ESP8266 IP address (e.g., 192.168.10.211)",
+)
+@click.option(
+    "--chunk-size",
+    "-c",
+    type=int,
+    default=1400,
+    help="Maximum chunk size in characters (default: 1400)",
+)
+def upload(bin_path, host, chunk_size):
+    """
+    Upload a .bin file to ESP8266 e-paper display.
+
+    BIN_PATH: Path to the .bin file (800x480 monochrome, 1-bit per pixel)
+
+    Example:
+        geink upload image.bin --host 192.168.10.211
+        geink upload image.bin -H 192.168.10.211
+    """
+    if not REQUESTS_AVAILABLE:
+        logger.error(
+            "requests library not installed. Install with: pip install requests"
+        )
+        return
+
+    if not host:
+        logger.error("Host is required. Use --host/-H option.")
+        return
+
+    from .config import TARGET_HEIGHT, TARGET_WIDTH
+
+    TOTAL_BYTES = TARGET_WIDTH * TARGET_HEIGHT // 8  # 48000 bytes for 800x480
+
+    def encode_byte(b: int) -> str:
+        """Encode a single byte (0-255) into two characters 'a' to 'p' (0-15)."""
+        low = b & 0x0F
+        high = (b >> 4) & 0x0F
+        return chr(ord("a") + low) + chr(ord("a") + high)
+
+    def encode_data(data: bytes) -> str:
+        """Encode binary data into string format expected by ESP8266."""
+        return "".join(encode_byte(b) for b in data)
+
+    def upload_chunk(chunk_host: str, chunk: str) -> bool:
+        """Upload a single chunk of encoded data to the ESP8266."""
+        url = f"http://{chunk_host}/upload"
+        try:
+            response = requests.post(url, data={"data": chunk}, timeout=30)
+            if response.status_code == 200:
+                logger.info(f"Uploaded chunk: {response.text.strip()}")
+                return True
+            else:
+                logger.error(f"Error {response.status_code}: {response.text.strip()}")
+                return False
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Network error: {e}")
+            return False
+
+    # Read binary file
+    bin_file = Path(bin_path)
+    with open(bin_file, "rb") as f:
+        data = f.read()
+
+    # Verify file size
+    if len(data) != TOTAL_BYTES:
+        logger.warning(f"Expected {TOTAL_BYTES} bytes, got {len(data)} bytes")
+        logger.warning("Make sure the image is 800x480 monochrome (1-bit per pixel)")
+
+    logger.info(f"Loaded {len(data)} bytes from {bin_file.name}")
+
+    # Encode entire data
+    logger.info("Encoding data...")
+    encoded = encode_data(data)
+    total_chars = len(encoded)
+    logger.info(f"Encoded to {total_chars} characters")
+
+    # Initialize display
+    init_url = f"http://{host}/init"
+    try:
+        logger.info("Initializing display...")
+        response = requests.get(init_url, timeout=10)
+        if response.status_code == 200:
+            logger.success(f"Init: {response.text.strip()}")
+        else:
+            logger.error(f"Init failed: {response.status_code}")
+            return
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Init error: {e}")
+        return
+
+    # Split into chunks
+    chunk_chars = (chunk_size // 2) * 2  # ensure even number
+    if chunk_chars <= 8:
+        logger.error(f"Chunk size too small: {chunk_chars}")
+        return
+
+    chunks = []
+    pos = 0
+    while pos < total_chars:
+        remaining = total_chars - pos
+        chunk_size_actual = min(chunk_chars - 8, remaining)
+        if chunk_size_actual <= 0:
+            chunk_size_actual = remaining
+        if chunk_size_actual % 2 != 0:
+            chunk_size_actual -= 1
+            if chunk_size_actual <= 0:
+                break
+        chunk = encoded[pos : pos + chunk_size_actual]
+        chunks.append(chunk)
+        pos += chunk_size_actual
+
+    logger.info(f"Splitting into {len(chunks)} chunks...")
+
+    # Upload each chunk
+    success_count = 0
+    for i, chunk in enumerate(chunks, 1):
+        length_chars = len(chunk)
+        len_chars = (
+            chr(ord("a") + (length_chars & 0x0F))
+            + chr(ord("a") + ((length_chars >> 4) & 0x0F))
+            + chr(ord("a") + ((length_chars >> 8) & 0x0F))
+            + chr(ord("a") + ((length_chars >> 12) & 0x0F))
+        )
+        full_chunk = chunk + len_chars + "LOAD"
+
+        logger.info(f"Uploading chunk {i}/{len(chunks)}...")
+        if upload_chunk(host, full_chunk):
+            success_count += 1
+        else:
+            logger.error("Upload failed. Stopping.")
+            return
+
+    if success_count == len(chunks):
+        # Trigger display refresh
+        show_url = f"http://{host}/show"
+        try:
+            logger.info("Refreshing display...")
+            response = requests.get(show_url, timeout=30)
+            if response.status_code == 200:
+                logger.success(f"Display refreshed: {response.text.strip()}")
+                logger.success("Done!")
+            else:
+                logger.error(f"Show failed: {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Show error: {e}")
+    else:
+        logger.error(f"Only {success_count}/{len(chunks)} chunks succeeded")
 
 
 if __name__ == "__main__":
