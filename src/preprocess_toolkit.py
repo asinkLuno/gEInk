@@ -27,10 +27,10 @@ def get_background_color(img: np.ndarray):
     return Counter(corners).most_common(1)[0][0]
 
 
-def is_solid_background(img: np.ndarray, tolerance: int = 30):
+def is_solid_background(img: np.ndarray, tolerance: int = 60):
     """
     检查图片背景是否是纯色。
-    通过检查图片边缘像素的颜色方差来判断。
+    通过检查图片四个角的颜色是否一致来判断。
     Args:
         img: OpenCV图片 (numpy.ndarray)
         tolerance: 颜色容差，值越大，对“纯色”的定义越宽松
@@ -38,30 +38,23 @@ def is_solid_background(img: np.ndarray, tolerance: int = 30):
         如果背景是纯色，则返回True，否则返回False
     """
     height, width, _ = img.shape
+    if height < 2 or width < 2:
+        return True
 
-    # 提取边缘像素
-    border_pixels = []
-    # 上下边缘
-    for x in range(width):
-        border_pixels.append(img[0, x])
-        border_pixels.append(img[height - 1, x])
-    # 左右边缘
-    for y in range(height):
-        border_pixels.append(img[y, 0])
-        border_pixels.append(img[y, width - 1])
-
-    # 将像素列表转换为Numpy数组
-    border_pixels = np.array(border_pixels)
-
-    if len(border_pixels) == 0:
-        return True  # 没有像素，视为纯色
+    corners = np.array(
+        [
+            img[0, 0],  # Top-left
+            img[0, width - 1],  # Top-right
+            img[height - 1, 0],  # Bottom-left
+            img[height - 1, width - 1],  # Bottom-right
+        ]
+    )
 
     # 计算颜色方差
-    avg_color = np.mean(border_pixels, axis=0)
-    color_variance = np.mean(np.sum((border_pixels - avg_color) ** 2, axis=1))
+    mean_color = np.mean(corners, axis=0)
+    variance = np.mean(np.sum((corners - mean_color) ** 2, axis=1))
 
-    # 判断是否为纯色
-    return color_variance < tolerance
+    return variance < tolerance
 
 
 @jit(nopython=True)
