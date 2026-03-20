@@ -4,16 +4,15 @@ import click
 import cv2
 from loguru import logger
 
-# Configure loguru to write to stdout for Click CLI testing
-logger.remove()
-logger.add(lambda msg: print(msg, end=""), format="{message}")
-
 from .config import COLOR_LEVELS, TARGET_HEIGHT, TARGET_WIDTH
-from .convert_toolkit import (convert_bin_to_c_array, convert_folder,
-                              convert_png_to_bin)
+from .convert_toolkit import convert_bin_to_c_array, convert_folder, convert_png_to_bin
 from .dithering_toolkit import apply_dithering
 from .grid_cutter import _grid_cut_image
 from .preprocess_toolkit import _preprocess_image
+
+# Configure loguru to write to stdout for Click CLI testing
+logger.remove()
+logger.add(lambda msg: print(msg, end=""), format="{message}")
 
 # Try to import requests, but handle gracefully if not installed
 try:

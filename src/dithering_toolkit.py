@@ -64,7 +64,7 @@ def _apply_error_diffusion(
         Dithered grayscale numpy.ndarray
     """
     if color_levels < 2:
-        logger.warning(f"色阶数量必须至少为2，已自动调整为2。")
+        logger.warning("色阶数量必须至少为2，已自动调整为2。")
         color_levels = 2
 
     dithered = gray_img.astype(np.float32)
@@ -159,7 +159,7 @@ def binary_thresholding(
     """
     logger.info(f"应用二分阈值处理，阈值为 {threshold}。")
     if color_levels != 2:
-        logger.warning(f"二分阈值处理仅支持2个颜色级别，已自动忽略 color_levels 参数。")
+        logger.warning("二分阈值处理仅支持2个颜色级别，已自动忽略 color_levels 参数。")
     # Make a copy to avoid modifying the original array
     binary_img = gray_img.copy()
     binary_img[binary_img <= threshold] = 0

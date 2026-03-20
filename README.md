@@ -7,9 +7,11 @@
 `geink` 工具提供以下子命令，每个子命令负责处理图像的不同阶段：
 
 ### 1. `preprocess` - 图像预处理
+
 负责将输入图片进行物体检测、智能裁切、背景处理、方向处理和 Resize 到指定尺寸。
 
 **处理流程:**
+
 ```mermaid
 flowchart TD
     A[输入图片] --> B[物体检测与裁切]
@@ -26,9 +28,11 @@ flowchart TD
 ```
 
 ### 2. `dither` - 图像抖动
+
 对预处理后的灰度图片应用抖动算法（如 Floyd-Steinberg 或 Jarvis, Judice, Ninke），转换为多级灰度图或二值图。
 
 **处理流程:**
+
 ```mermaid
 flowchart TD
     A[输入灰度图] --> B[应用抖动算法]
@@ -36,17 +40,21 @@ flowchart TD
 ```
 
 ### 3. `convert` - 转换为 EPD 格式
+
 将抖动后的图片（多级灰度或二值）转换为电子墨水屏专用的原始二进制 (`.bin`) 格式。
 
 **处理流程:**
+
 ```mermaid
 flowchart TD
     A[输入抖动后的图片] --> B[转换为 EPD 二进制格式]
     B --> C[输出 .bin 文件]
 ```
+
 ## 使用方法
 
 首先，安装项目依赖：
+
 ```bash
 pip install -e ".[dev]"
 ```
@@ -54,6 +62,7 @@ pip install -e ".[dev]"
 `geink` 是一个命令行工具，通过子命令进行操作。
 
 ### 1. 图像预处理 (`preprocess`)
+
 将图片预处理到目标尺寸。支持单个文件或目录批量处理。
 
 ```bash
@@ -65,6 +74,7 @@ geink preprocess path/to/images/
 ```
 
 ### 2. 图像抖动 (`dither`)
+
 对预处理后的图片进行抖动处理。支持单个文件或批量处理 `_crop` 图片。
 
 ```bash
@@ -76,6 +86,7 @@ geink dither path/to/images/
 ```
 
 ### 3. 转换为 EPD 格式 (`convert`)
+
 将抖动后的图片转换为 EPD 原始二进制格式。
 
 ```bash
@@ -87,6 +98,7 @@ geink convert path/to/images/
 ```
 
 ### 4. 上传图像到设备 (`upload`)
+
 将 `.bin` 文件通过 HTTP 分块上传到 ESP8266 e-paper display。
 
 ```bash
@@ -155,7 +167,7 @@ geink upload path/to/image.bin -H 192.168.10.211 --chunk-size 2000
 
 自动生成 `.h` 头文件供 ESPSlider 使用。
 
----
+______________________________________________________________________
 
 ## ESPSlider 固件烧录
 
@@ -175,6 +187,7 @@ arduino-cli compile --fqbn esp8266:esp8266:generic /home/guozr/CODE/gEInk/ESPSli
 ```
 
 编译成功后会生成固件文件：
+
 - `/home/guozr/.cache/arduino/sketches/.../ESPSlider.ino.bin` - 烧录用固件
 - `/home/guozr/.cache/arduino/sketches/.../ESPSlider.ino.elf` - ELF 调试文件
 
@@ -202,7 +215,7 @@ minicom -D /dev/ttyUSB0 -b 115200
 | IRAM (指令内存) | 60,807 B | 65,536 B | 92% |
 | Flash (代码) | 304,024 B | 1,048,576 B | 28% |
 
----
+______________________________________________________________________
 
 ## SimpleLoader 固件烧录
 
@@ -224,6 +237,7 @@ arduino-cli compile --fqbn esp8266:esp8266:generic \
 ```
 
 编译成功后会生成固件文件：
+
 - `/home/guozr/.cache/arduino/sketches/.../SimpleLoader.cpp.bin` - 烧录用固件
 
 ### 烧录固件
@@ -236,10 +250,10 @@ arduino-cli upload -p /dev/ttyUSB0 --fqbn esp8266:esp8266:generic /home/guozr/CO
 ### 使用方法
 
 1. 固件启动后会自动连接 WiFi
-2. 访问 http://<IP>/ 查看状态
-3. 初始化屏幕：`curl http://<IP>/init`
-4. 上传图像数据：`curl -X POST -d 'data=...' http://<IP>/upload`
-5. 显示图像：`curl http://<IP>/show`
+1. 访问 http://<IP>/ 查看状态
+1. 初始化屏幕：`curl http://<IP>/init`
+1. 上传图像数据：`curl -X POST -d 'data=...' http://<IP>/upload`
+1. 显示图像：`curl http://<IP>/show`
 
 ### 资源使用
 
