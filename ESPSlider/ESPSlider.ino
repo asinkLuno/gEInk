@@ -21,9 +21,9 @@ void displayImage(int index) {
     // Initialize e-Paper
     EPD_7in5_V2_init();
 
-    // Send image data
-    const uint8_t* data = images[index].data;
-    size_t size = images[index].size;
+    // Send image data (read pointer and size from PROGMEM struct correctly)
+    const uint8_t* data = (const uint8_t*)pgm_read_ptr(&images[index].data);
+    size_t size = (size_t)pgm_read_dword(&images[index].size);
 
     // Progress indicator
     int progress = 0;
@@ -60,9 +60,11 @@ void setup() {
     Serial.println("Interval: 30 seconds");
     Serial.println("====================================\r\n");
 
-    // Initialize SPI pins
-    pinMode(PIN_SPI_SCK, OUTPUT);
-    pinMode(PIN_SPI_DIN, OUTPUT);
+    // Initialize hardware SPI (4 MHz, MSB first, Mode 0)
+    SPI.begin();
+    SPI.setFrequency(4000000);
+
+    // Initialize control pins
     pinMode(CS_PIN, OUTPUT);
     pinMode(RST_PIN, OUTPUT);
     pinMode(DC_PIN, OUTPUT);

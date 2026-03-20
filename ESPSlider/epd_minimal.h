@@ -50,17 +50,7 @@ void EPD_SendData(byte data)
 void EpdSpiTransferCallback(byte data)
 {
     digitalWrite(CS_PIN, GPIO_PIN_RESET);
-
-    for (int i = 0; i < 8; i++)
-    {
-        if ((data & 0x80) == 0) digitalWrite(PIN_SPI_DIN, GPIO_PIN_RESET);
-        else                    digitalWrite(PIN_SPI_DIN, GPIO_PIN_SET);
-
-        data <<= 1;
-        digitalWrite(PIN_SPI_SCK, GPIO_PIN_SET);
-        digitalWrite(PIN_SPI_SCK, GPIO_PIN_RESET);
-    }
-
+    SPI.transfer(data);
     digitalWrite(CS_PIN, GPIO_PIN_SET);
 }
 
