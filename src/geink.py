@@ -2,10 +2,10 @@ from pathlib import Path
 
 import click
 import cv2
+import numpy as np
 from loguru import logger
 
 from .config import TARGET_HEIGHT, TARGET_WIDTH
-from .convert_toolkit import convert_bin_to_c_array, convert_folder, convert_png_to_bin
 from .dithering_toolkit import apply_dithering
 from .grid_cutter import _grid_cut_image
 from .preprocess_toolkit import _preprocess_image
@@ -26,104 +26,27 @@ except ImportError:
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"}
 
 
-def process_single_image(input_path, output_path, processor_func):
-    """Process a single image file."""
-    logger.info(f"Processing {input_path} -> {output_path}")
-    processed_img = processor_func(input_path)
+def _process_image(img_path, bin_path, preview_path, width, height, method):
+    """Preprocess → grayscale → dither → save preview + .bin"""
+    bgr = _preprocess_image(img_path, width, height)
+    if bgr is None:
+        return False
 
-    if processed_img is not None:
-        try:
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-            cv2.imwrite(output_path, processed_img)
-            logger.success(f"Saved: {output_path}")
-            return True
-        except Exception as e:
-            logger.error(f"Error saving {output_path}: {e}")
-    else:
-        logger.error(f"Failed to process {input_path}")
-    return False
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    dithered = apply_dithering(gray, method)
 
+    Path(bin_path).parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(preview_path), dithered)
+    Path(bin_path).write_bytes(np.packbits((dithered >= 128).reshape(-1)).tobytes())
 
-def _run_command(
-    input_path,
-    output_path,
-    processor_func,
-    make_output_path,
-    skip_patterns=None,
-    require_patterns=None,
-):
-    """Run a command on a single file or all images in a directory.
-
-    Args:
-        input_path: Input file path or directory path
-        output_path: Output file path (optional for files, None for directories)
-        processor_func: Function that takes input path and returns processed image
-        make_output_path: Function that takes input Path and returns output Path
-        skip_patterns: List of patterns to skip (e.g., ['_crop', '_dithered'])
-        require_patterns: List of patterns that files must match (e.g., ['_crop'])
-    """
-    input_obj = Path(input_path)
-    skip_patterns = skip_patterns or []
-    require_patterns = require_patterns or []
-
-    if input_obj.is_file():
-        if require_patterns and not any(p in input_obj.name for p in require_patterns):
-            logger.warning(
-                f"Skipping {input_obj.name}: does not match required patterns {require_patterns}"
-            )
-            return
-        output = output_path or str(make_output_path(input_obj))
-        success = process_single_image(input_path, output, processor_func)
-        if not success:
-            logger.error("Processing failed.")
-    else:
-        input_dir = input_obj
-        count = 0
-        for img_file in input_dir.iterdir():
-            if img_file.suffix.lower() not in IMAGE_EXTENSIONS:
-                continue
-            if any(p in img_file.name for p in skip_patterns):
-                continue
-            if require_patterns and not any(
-                p in img_file.name for p in require_patterns
-            ):
-                continue
-            output = str(make_output_path(img_file))
-            if process_single_image(str(img_file), output, processor_func):
-                count += 1
-        logger.success(f"Processed {count} images in {input_dir}")
+    logger.success(f"bin: {bin_path}")
+    logger.success(f"preview: {preview_path}")
+    return True
 
 
 @click.group()
 def cli():
-    """
-    Geink CLI for e-paper image processing.
-    """
-
-
-@cli.command()
-@click.argument("input_path", type=click.Path(exists=True))
-@click.argument("output_path", type=click.Path(), required=False)
-def preprocess(input_path, output_path):
-    """
-    Preprocesses an image or all images in a directory.
-    """
-
-    def make_output(input_path_obj):
-        return input_path_obj.with_name(
-            f"{input_path_obj.stem}_crop{input_path_obj.suffix}"
-        )
-
-    def processor(img_path):
-        return _preprocess_image(img_path, TARGET_WIDTH, TARGET_HEIGHT)
-
-    _run_command(
-        input_path,
-        output_path,
-        processor,
-        make_output,
-        skip_patterns=["_crop", "_dithered"],
-    )
+    """Geink CLI for e-paper image processing."""
 
 
 @cli.command()
@@ -132,78 +55,42 @@ def preprocess(input_path, output_path):
 @click.option("--width", "-w", type=int, default=TARGET_WIDTH, help="Target width")
 @click.option("--height", "-h", type=int, default=TARGET_HEIGHT, help="Target height")
 @click.option(
-    "--espslider-dir",
-    type=click.Path(),
-    default="ESPSlider/",
-    help="ESPSlider directory for .h output (default: ESPSlider/)",
-)
-def convert(input_path, output_path, width, height, espslider_dir):
-    """
-    Converts _dithered images to EPD binary format (.bin).
-
-    Accepts a single image file or a directory of _dithered images.
-    Output .bin files are saved in the same directory by default.
-    C header files are automatically generated in ESPSlider/ directory.
-    """
-    input_path_obj = Path(input_path)
-
-    if input_path_obj.is_file():
-        if output_path is None:
-            output_path = str(
-                input_path_obj.with_name(
-                    input_path_obj.stem.replace("_dithered", "") + ".bin"
-                )
-            )
-
-        if convert_png_to_bin(input_path, output_path, width, height):
-            logger.success(f"Successfully converted to {output_path}")
-            bin_path = Path(output_path)
-            array_name = f"{bin_path.stem}_data"
-            header_path = Path(espslider_dir) / f"{bin_path.stem}.h"
-            convert_bin_to_c_array(output_path, array_name, str(header_path))
-        else:
-            logger.error("Conversion failed.")
-
-    else:
-        count = convert_folder(
-            input_path, output_path, width, height, espslider_dir=espslider_dir
-        )
-        if count == 0:
-            logger.error("No files converted.")
-
-
-@cli.command()
-@click.argument("input_path", type=click.Path(exists=True))
-@click.argument("output_path", type=click.Path(), required=False)
-@click.option(
     "--method",
     "-m",
     type=click.Choice(["atkinson", "binary_threshold"]),
     default="atkinson",
-    help="Dithering algorithm to use",
+    help="Dithering algorithm",
 )
-def dither(input_path, output_path, method):
+def process(input_path, output_path, width, height, method):
     """
-    Applies dithering to an image or all _crop images in a directory.
+    Process image(s) to EPD binary format.
 
-    Use --method/-m to choose the dithering algorithm.
+    Outputs a .bin file and a _preview.png alongside it.
+
+    Examples:
+        geink process photo.jpg
+        geink process photo.jpg output.bin
+        geink process ./photos/
     """
+    input_obj = Path(input_path)
 
-    def make_output(input_path_obj):
-        return input_path_obj.with_name(
-            input_path_obj.stem.replace("_crop", "_dithered") + input_path_obj.suffix
-        )
-
-    def processor(img_path):
-        img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-        if img is None:
-            logger.error(f"Error: Cannot read image '{img_path}'.")
-            return None
-        return apply_dithering(img, method)
-
-    _run_command(
-        input_path, output_path, processor, make_output, require_patterns=["_crop"]
-    )
+    if input_obj.is_file():
+        bin_out = Path(output_path) if output_path else input_obj.with_suffix(".bin")
+        preview_out = bin_out.with_name(bin_out.stem + "_preview.png")
+        if not _process_image(input_path, bin_out, preview_out, width, height, method):
+            logger.error("Processing failed.")
+    else:
+        count = 0
+        for img_file in sorted(input_obj.iterdir()):
+            if img_file.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+            if "_preview" in img_file.name:
+                continue
+            bin_out = img_file.with_suffix(".bin")
+            preview_out = img_file.with_name(img_file.stem + "_preview.png")
+            if _process_image(str(img_file), bin_out, preview_out, width, height, method):
+                count += 1
+        logger.success(f"Processed {count} images in {input_obj}")
 
 
 @cli.command()
@@ -212,17 +99,15 @@ def dither(input_path, output_path, method):
 @click.option("--cols", "-c", type=int, required=True, help="Number of columns")
 def gridcut(input_path, rows, cols):
     """
-    Cuts an image or all images in a directory into a grid.
+    Cut an image or directory of images into a grid.
 
-    Each image is split into rows × cols tiles.
-    Output files are saved in a subdirectory named after the image (without extension).
-    Example: input.jpg -> input/r0_c0.png, input/r0_c1.png, etc.
+    Output tiles are saved in a subdirectory named after the image.
+    Example: input.jpg -> input/r0_c0.png, input/r0_c1.png, ...
     """
     input_obj = Path(input_path)
 
     if input_obj.is_file():
-        success = _grid_cut_image(input_path, rows, cols)
-        if not success:
+        if not _grid_cut_image(input_path, rows, cols):
             logger.error("Grid cut failed.")
     else:
         count = 0
@@ -236,144 +121,34 @@ def gridcut(input_path, rows, cols):
 
 @cli.command()
 @click.argument("bin_path", type=click.Path(exists=True))
-@click.option(
-    "--host",
-    "-H",
-    required=True,
-    help="ESP8266 IP address (e.g., 192.168.10.211)",
-)
-@click.option(
-    "--chunk-size",
-    "-c",
-    type=int,
-    default=1400,
-    help="Maximum chunk size in characters (default: 1400)",
-)
-def upload(bin_path, host, chunk_size):
+@click.option("--host", "-H", required=True, help="ESPSlider IP address")
+def upload(bin_path, host):
     """
-    Upload a .bin file to ESP8266 e-paper display.
-
-    BIN_PATH: Path to the .bin file (800x480 monochrome, 1-bit per pixel)
+    Upload a .bin file to ESPSlider over WiFi.
 
     Example:
-        geink upload image.bin --host 192.168.10.211
-        geink upload image.bin -H 192.168.10.211
+        geink upload image.bin --host 192.168.1.100
     """
     if not REQUESTS_AVAILABLE:
-        logger.error(
-            "requests library not installed. Install with: pip install requests"
-        )
+        logger.error("requests not installed: pip install requests")
         return
 
-    if not host:
-        logger.error("Host is required. Use --host/-H option.")
-        return
-
-    from .config import TARGET_HEIGHT, TARGET_WIDTH
-
-    TOTAL_BYTES = TARGET_WIDTH * TARGET_HEIGHT // 8  # 48000 bytes for 800x480
-
-    def encode_byte(b: int) -> str:
-        """Encode a single byte (0-255) into two characters 'a' to 'p' (0-15)."""
-        low = b & 0x0F
-        high = (b >> 4) & 0x0F
-        return chr(ord("a") + low) + chr(ord("a") + high)
-
-    def encode_data(data: bytes) -> str:
-        """Encode binary data into string format expected by ESP8266."""
-        return "".join(encode_byte(b) for b in data)
-
-    def upload_chunk(chunk_host: str, chunk: str) -> bool:
-        """Upload a single chunk of encoded data to the ESP8266."""
-        url = f"http://{chunk_host}/upload"
-        try:
-            response = requests.post(url, data={"data": chunk}, timeout=30)
-            if response.status_code == 200:
-                logger.info(f"Uploaded chunk: {response.text.strip()}")
-                return True
-            else:
-                logger.error(f"Error {response.status_code}: {response.text.strip()}")
-                return False
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Network error: {e}")
-            return False
-
-    # Read binary file
     bin_file = Path(bin_path)
-    with open(bin_file, "rb") as f:
-        data = f.read()
+    data = bin_file.read_bytes()
+    logger.info(f"Uploading {bin_file.name} ({len(data)} bytes) to {host}...")
 
-    # Verify file size
-    if len(data) != TOTAL_BYTES:
-        logger.warning(f"Expected {TOTAL_BYTES} bytes, got {len(data)} bytes")
-        logger.warning("Make sure the image is 800x480 monochrome (1-bit per pixel)")
-
-    logger.info(f"Loaded {len(data)} bytes from {bin_file.name}")
-
-    # Encode entire data
-    logger.info("Encoding data...")
-    encoded = encode_data(data)
-    total_chars = len(encoded)
-    logger.info(f"Encoded to {total_chars} characters")
-
-    # Initialize display
-    init_url = f"http://{host}/init"
     try:
-        logger.info("Initializing display...")
-        response = requests.get(init_url, timeout=10)
-        if response.status_code == 200:
-            logger.success(f"Init: {response.text.strip()}")
-        else:
-            logger.error(f"Init failed: {response.status_code}")
-            return
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Init error: {e}")
-        return
-
-    # Each chunk: payload + 4-char length prefix + "LOAD" suffix (8 chars total overhead)
-    # Payload must be even: each encoded byte = 2 chars
-    payload_chars = ((chunk_size - 8) // 2) * 2
-    if payload_chars <= 0:
-        logger.error(f"Chunk size too small: {chunk_size}")
-        return
-
-    chunks = [encoded[i : i + payload_chars] for i in range(0, total_chars, payload_chars)]
-    logger.info(f"Splitting into {len(chunks)} chunks...")
-
-    # Upload each chunk
-    success_count = 0
-    for i, chunk in enumerate(chunks, 1):
-        length_chars = len(chunk)
-        len_chars = (
-            chr(ord("a") + (length_chars & 0x0F))
-            + chr(ord("a") + ((length_chars >> 4) & 0x0F))
-            + chr(ord("a") + ((length_chars >> 8) & 0x0F))
-            + chr(ord("a") + ((length_chars >> 12) & 0x0F))
+        response = requests.post(
+            f"http://{host}/upload",
+            files={"file": (bin_file.name, data, "application/octet-stream")},
+            timeout=30,
         )
-        full_chunk = chunk + len_chars + "LOAD"
-
-        logger.info(f"Uploading chunk {i}/{len(chunks)}...")
-        if upload_chunk(host, full_chunk):
-            success_count += 1
+        if response.status_code == 200:
+            logger.success(f"Uploaded {bin_file.name}")
         else:
-            logger.error("Upload failed. Stopping.")
-            return
-
-    if success_count == len(chunks):
-        # Trigger display refresh
-        show_url = f"http://{host}/show"
-        try:
-            logger.info("Refreshing display...")
-            response = requests.get(show_url, timeout=30)
-            if response.status_code == 200:
-                logger.success(f"Display refreshed: {response.text.strip()}")
-                logger.success("Done!")
-            else:
-                logger.error(f"Show failed: {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Show error: {e}")
-    else:
-        logger.error(f"Only {success_count}/{len(chunks)} chunks succeeded")
+            logger.error(f"Upload failed: {response.status_code} {response.text.strip()}")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Network error: {e}")
 
 
 if __name__ == "__main__":
