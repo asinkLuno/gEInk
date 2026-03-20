@@ -190,10 +190,8 @@ def convert(input_path, output_path, width, height, color_levels, espslider_dir)
 @click.option(
     "--method",
     "-m",
-    type=click.Choice(
-        ["floyd_steinberg", "jarvis_judice_ninke", "stucki", "binary_threshold"]
-    ),
-    default="jarvis_judice_ninke",
+    type=click.Choice(["atkinson", "binary_threshold"]),
+    default="atkinson",
     help="Dithering algorithm to use",
 )
 def dither(input_path, output_path, method):
@@ -213,7 +211,7 @@ def dither(input_path, output_path, method):
         if img is None:
             logger.error(f"Error: Cannot read image '{img_path}'.")
             return None
-        return apply_dithering(img, method, COLOR_LEVELS)
+        return apply_dithering(img, method)
 
     _run_command(
         input_path, output_path, processor, make_output, require_patterns=["_crop"]
