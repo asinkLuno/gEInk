@@ -4,7 +4,7 @@ import click
 import cv2
 from loguru import logger
 
-from .config import COLOR_LEVELS, TARGET_HEIGHT, TARGET_WIDTH
+from .config import TARGET_HEIGHT, TARGET_WIDTH
 from .convert_toolkit import convert_bin_to_c_array, convert_folder, convert_png_to_bin
 from .dithering_toolkit import apply_dithering
 from .grid_cutter import _grid_cut_image
@@ -132,19 +132,12 @@ def preprocess(input_path, output_path):
 @click.option("--width", "-w", type=int, default=TARGET_WIDTH, help="Target width")
 @click.option("--height", "-h", type=int, default=TARGET_HEIGHT, help="Target height")
 @click.option(
-    "--color-levels",
-    "-c",
-    type=int,
-    default=COLOR_LEVELS,
-    help="Number of color levels (must be power of 2)",
-)
-@click.option(
     "--espslider-dir",
     type=click.Path(),
     default="ESPSlider/",
     help="ESPSlider directory for .h output (default: ESPSlider/)",
 )
-def convert(input_path, output_path, width, height, color_levels, espslider_dir):
+def convert(input_path, output_path, width, height, espslider_dir):
     """
     Converts _dithered images to EPD binary format (.bin).
 
@@ -162,7 +155,7 @@ def convert(input_path, output_path, width, height, color_levels, espslider_dir)
                 )
             )
 
-        if convert_png_to_bin(input_path, output_path, width, height, color_levels):
+        if convert_png_to_bin(input_path, output_path, width, height):
             logger.success(f"Successfully converted to {output_path}")
             bin_path = Path(output_path)
             array_name = f"{bin_path.stem}_data"
@@ -173,12 +166,7 @@ def convert(input_path, output_path, width, height, color_levels, espslider_dir)
 
     else:
         count = convert_folder(
-            input_path,
-            output_path,
-            width,
-            height,
-            color_levels,
-            espslider_dir=espslider_dir,
+            input_path, output_path, width, height, espslider_dir=espslider_dir
         )
         if count == 0:
             logger.error("No files converted.")
@@ -342,27 +330,14 @@ def upload(bin_path, host, chunk_size):
         logger.error(f"Init error: {e}")
         return
 
-    # Split into chunks
-    chunk_chars = (chunk_size // 2) * 2  # ensure even number
-    if chunk_chars <= 8:
-        logger.error(f"Chunk size too small: {chunk_chars}")
+    # Each chunk: payload + 4-char length prefix + "LOAD" suffix (8 chars total overhead)
+    # Payload must be even: each encoded byte = 2 chars
+    payload_chars = ((chunk_size - 8) // 2) * 2
+    if payload_chars <= 0:
+        logger.error(f"Chunk size too small: {chunk_size}")
         return
 
-    chunks = []
-    pos = 0
-    while pos < total_chars:
-        remaining = total_chars - pos
-        chunk_size_actual = min(chunk_chars - 8, remaining)
-        if chunk_size_actual <= 0:
-            chunk_size_actual = remaining
-        if chunk_size_actual % 2 != 0:
-            chunk_size_actual -= 1
-            if chunk_size_actual <= 0:
-                break
-        chunk = encoded[pos : pos + chunk_size_actual]
-        chunks.append(chunk)
-        pos += chunk_size_actual
-
+    chunks = [encoded[i : i + payload_chars] for i in range(0, total_chars, payload_chars)]
     logger.info(f"Splitting into {len(chunks)} chunks...")
 
     # Upload each chunk
