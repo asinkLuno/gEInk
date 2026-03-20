@@ -25,7 +25,7 @@ repos:
       - id: vulture
         name: vulture
         entry: vulture
-        args: ["aink/", "--min-confidence", "80", "--exclude", ".venv"]
+        args: ["src/", "--min-confidence", "80", "--exclude", ".venv"]
         language: system
         pass_filenames: false
 
@@ -34,7 +34,7 @@ repos:
       - id: radon
         name: radon
         entry: uvx
-        args: ["radon", "cc", "aink/", "--min=B"]
+        args: ["radon", "cc", "src/", "--min=B"]
         language: system
         pass_filenames: false
 
@@ -84,3 +84,12 @@ repos:
         entry: mdformat
         language: system
         types: [markdown]
+
+  - repo: local
+    hooks:
+      - id: clang-format
+        name: clang-format (Arduino)
+        entry: clang-format
+        args: [-i]
+        language: system
+        files: ^ESPSlider/.*\.(ino|h)$

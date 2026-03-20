@@ -27,13 +27,13 @@
 #endif
 
 #define INTERVAL_MS 30000
-#define MAX_IMAGES  64
+#define MAX_IMAGES 64
 
 ESP8266WebServer server(80);
 
 static char imagePaths[MAX_IMAGES][32];
-static int  imageCount  = 0;
-static int  currentImage = 0;
+static int imageCount = 0;
+static int currentImage = 0;
 static unsigned long lastChange = 0;
 
 // ---- Image list ---------------------------------------------------------
@@ -61,14 +61,19 @@ void loadImageList() {
 // ---- Display ------------------------------------------------------------
 
 void displayImage(int index) {
-    if (index < 0 || index >= imageCount) return;
+    if (index < 0 || index >= imageCount)
+        return;
     Serial.printf("Displaying %s\n", imagePaths[index]);
 
     File f = LittleFS.open(imagePaths[index], "r");
-    if (!f) { Serial.println("Failed to open"); return; }
+    if (!f) {
+        Serial.println("Failed to open");
+        return;
+    }
 
     EPD_7in5_V2_init();
-    while (f.available()) EPD_SendData(f.read());
+    while (f.available())
+        EPD_SendData(f.read());
     f.close();
     EPD_7IN5_V2_Show();
 }
@@ -78,13 +83,14 @@ void displayImage(int index) {
 static File uploadFile;
 
 void handleUploadBody() {
-    HTTPUpload& upload = server.upload();
+    HTTPUpload &upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
         String path = "/" + upload.filename;
         Serial.printf("Receiving: %s\n", path.c_str());
         uploadFile = LittleFS.open(path, "w");
     } else if (upload.status == UPLOAD_FILE_WRITE) {
-        if (uploadFile) uploadFile.write(upload.buf, upload.currentSize);
+        if (uploadFile)
+            uploadFile.write(upload.buf, upload.currentSize);
     } else if (upload.status == UPLOAD_FILE_END) {
         if (uploadFile) {
             uploadFile.close();
@@ -97,7 +103,8 @@ void handleUploadBody() {
 void handleList() {
     String json = "[";
     for (int i = 0; i < imageCount; i++) {
-        if (i > 0) json += ",";
+        if (i > 0)
+            json += ",";
         json += "\"" + String(imagePaths[i]).substring(1) + "\"";
     }
     json += "]";
@@ -105,7 +112,10 @@ void handleList() {
 }
 
 void handleDelete() {
-    if (!server.hasArg("name")) { server.send(400, "text/plain", "Missing name"); return; }
+    if (!server.hasArg("name")) {
+        server.send(400, "text/plain", "Missing name");
+        return;
+    }
     String path = "/" + server.arg("name");
     if (LittleFS.remove(path)) {
         loadImageList();
@@ -121,20 +131,23 @@ void setup() {
     Serial.begin(115200);
     delay(1000);
 
-    if (!LittleFS.begin()) { Serial.println("LittleFS mount failed"); return; }
+    if (!LittleFS.begin()) {
+        Serial.println("LittleFS mount failed");
+        return;
+    }
     loadImageList();
 
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     Serial.print("WiFi");
     for (int i = 0; i < 50 && WiFi.status() != WL_CONNECTED; i++) {
-        delay(200); Serial.print(".");
+        delay(200);
+        Serial.print(".");
     }
     if (WiFi.status() == WL_CONNECTED) {
         Serial.printf("\nIP: %s\n", WiFi.localIP().toString().c_str());
-        server.on("/upload", HTTP_POST,
-            []() { server.send(200, "text/plain", "OK"); },
-            handleUploadBody);
-        server.on("/list",   HTTP_GET, handleList);
+        server.on(
+            "/upload", HTTP_POST, []() { server.send(200, "text/plain", "OK"); }, handleUploadBody);
+        server.on("/list", HTTP_GET, handleList);
         server.on("/delete", HTTP_GET, handleDelete);
         server.begin();
     } else {
@@ -148,7 +161,8 @@ void setup() {
     pinMode(DC_PIN, OUTPUT);
     pinMode(BUSY_PIN, INPUT);
 
-    if (imageCount > 0) displayImage(0);
+    if (imageCount > 0)
+        displayImage(0);
 }
 
 void loop() {
