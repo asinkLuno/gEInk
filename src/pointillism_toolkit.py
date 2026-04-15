@@ -2,13 +2,16 @@ import cv2
 import numpy as np
 from loguru import logger
 
-# 默认 5 色调色盘: 红, 黄, 蓝, 黑, 白 (BGR 顺序)
+# 默认 7 色调色盘: 黑, 白, 红, 绿, 蓝, 黄, 橙 (BGR 顺序)
+# 选色参考 ACeP 七色标准并进行审美优化
 DEFAULT_PALETTE = np.array([
-    [0, 0, 255],    # Red
-    [0, 255, 255],  # Yellow
-    [255, 0, 0],    # Blue
-    [0, 0, 0],      # Black
-    [255, 255, 255] # White
+    [0, 0, 0],          # Black
+    [255, 255, 255],    # White
+    [0, 0, 200],        # Red (沉稳红)
+    [0, 160, 0],        # Green (森林绿)
+    [160, 0, 0],        # Blue (深海蓝)
+    [0, 220, 255],      # Yellow (明黄)
+    [0, 110, 255]       # Orange (活力橙)
 ], dtype=np.float32)
 
 ATKINSON_KERNEL = [
@@ -44,8 +47,18 @@ def _draw_dot(canvas: np.ndarray, cx: int, cy: int, radius: int, color: np.ndarr
     ys = np.arange(y0, y1) - cy
     xs = np.arange(x0, x1) - cx
     DX, DY = np.meshgrid(xs, ys)
-    circle = DX ** 2 + DY ** 2 <= radius ** 2
-    canvas[y0:y1, x0:x1][circle] = color
+    dist2 = (DX ** 2 + DY ** 2).astype(np.float32)
+
+    # 高斯衰减：中心全色，边缘渐淡，圆外截断
+    sigma2 = (radius * 0.5) ** 2
+    alpha = np.exp(-dist2 / (2 * sigma2))
+    alpha[dist2 > radius ** 2] = 0.0
+
+    region = canvas[y0:y1, x0:x1].astype(np.float32)
+    alpha3 = alpha[:, :, np.newaxis]
+    canvas[y0:y1, x0:x1] = np.clip(
+        region * (1 - alpha3) + np.array(color, dtype=np.float32) * alpha3, 0, 255
+    ).astype(np.uint8)
 
 
 def _render_dots(
