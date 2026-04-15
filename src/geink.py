@@ -7,8 +7,9 @@ import requests
 from loguru import logger
 
 from .ascii_art_toolkit import render_ascii_art
-from .config import TARGET_HEIGHT, TARGET_WIDTH
+from .config import IMAGE_EXTENSIONS, TARGET_HEIGHT, TARGET_WIDTH
 from .dithering_toolkit import apply_dithering
+from .edge_cutter import edge_cut_cmd
 from .grid_cutter import grid_cut_image
 from .pointillism_toolkit import (
     DEFAULT_PALETTE,
@@ -21,9 +22,6 @@ from .preprocess_toolkit import preprocess_image
 # Configure loguru to write to stdout for Click CLI testing
 logger.remove()
 _ = logger.add(lambda msg: print(msg, end=""), format="{message}")
-
-# Supported image extensions
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"}
 
 
 def _process_image(
@@ -323,6 +321,10 @@ def upload(bin_path: str, host: str) -> None:
             )
     except Exception as e:
         logger.error(f"Network error: {e}")
+
+
+# Register commands from sub-modules
+cli.add_command(edge_cut_cmd)
 
 
 if __name__ == "__main__":

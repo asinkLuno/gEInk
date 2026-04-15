@@ -25,7 +25,7 @@ def grid_cut(image: np.ndarray | str | Path, rows: int, cols: int) -> list[np.nd
         raise ValueError("rows and cols must be >= 1")
 
     if isinstance(image, (str, Path)):
-        img = cv2.imread(str(image))
+        img = cv2.imread(str(image), cv2.IMREAD_UNCHANGED)
         if img is None:
             raise cv2.error(f"Failed to read image: {image}")
     else:
@@ -61,7 +61,7 @@ def grid_cut_image(img_path: str, rows: int, cols: int) -> bool:
     Returns:
         bool: 成功返回 True
     """
-    img = cv2.imread(img_path)
+    img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
     if img is None:
         logger.error(f"无法读取图片: {img_path}")
         return False
