@@ -31,3 +31,5 @@ processed_images/
 
 # Generated C header files for ESPSlider
 ESPSlider/image*.h
+
+**/.DS_Store

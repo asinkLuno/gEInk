@@ -15,6 +15,7 @@ from .pointillism_toolkit import (
     DEFAULT_PALETTE,
     color_atkinson_dithering,
     create_color_blocks,
+    load_brush_textures,
     render_color_pointillism,
 )
 from .preprocess_toolkit import preprocess_image
@@ -162,6 +163,7 @@ def gridcut(input_path: str, rows: int, cols: int) -> None:
 @click.option(
     "--alpha",
     "-a",
+    "pipeline_alpha",
     type=float,
     default=0.5,
     help="Watercolor dot opacity (0=transparent, 1=opaque)",
@@ -175,7 +177,7 @@ def pointillize(
     dot_radius: int,
     jitter: int,
     max_dim: int,
-    alpha: float,
+    pipeline_alpha: float,
 ) -> None:
     """
     Convert image(s) to color pointillism art.
@@ -187,6 +189,9 @@ def pointillize(
         geink pointillize photo.jpg out.png --scale 6 --dot-radius 5
     """
     input_obj = Path(input_path)
+
+    # 在此处加载纹理，避免在循环中重复加载
+    brush_textures = load_brush_textures("oil_paint_texture")
 
     def process_one(img_file: Path, out_file: Path) -> bool:
         img = cv2.imread(str(img_file))
@@ -209,7 +214,12 @@ def pointillize(
         blocked = create_color_blocks(img, spatial_rad=spatial_rad, color_rad=color_rad)
         dithered = color_atkinson_dithering(blocked, DEFAULT_PALETTE)
         art = render_color_pointillism(
-            dithered, scale=scale, base_radius=dot_radius, jitter=jitter, alpha=alpha
+            dithered,
+            scale=scale,
+            base_radius=dot_radius,
+            jitter=jitter,
+            alpha=pipeline_alpha,
+            brush_textures=brush_textures,
         )
 
         _ = cv2.imwrite(str(out_file), art)

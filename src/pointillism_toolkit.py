@@ -1,4 +1,5 @@
 import random
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -35,6 +36,39 @@ _DEFAULT_PALETTE_HEX = [
 DEFAULT_PALETTE: np.ndarray = np.array(
     [hex_to_bgr(h) for h in _DEFAULT_PALETTE_HEX], dtype=np.float32
 )
+
+
+def load_brush_textures(texture_dir: str) -> list[np.ndarray]:
+    """
+    扫描目录并加载笔触纹理。
+    期望 PNG 格式，并提取 alpha 通道作为 mask。
+    """
+    textures = []
+    path = Path(texture_dir)
+    if not path.exists():
+        logger.warning(f"纹理目录不存在: {texture_dir}")
+        return []
+
+    # 支持常用的图片格式
+    files = list(path.glob("*.png")) + list(path.glob("*.jpg")) + list(path.glob("*.jpeg"))
+    for f in files:
+        # 使用 IMREAD_UNCHANGED 保留 alpha 通道
+        img = cv2.imread(str(f), cv2.IMREAD_UNCHANGED)
+        if img is None:
+            continue
+
+        # 如果有 alpha 通道，提取它作为 mask
+        if img.shape[2] == 4:
+            mask = img[:, :, 3].astype(np.float32) / 255.0
+        else:
+            # 否则转为灰度并反转（假设白底黑字笔触）
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            mask = (255 - gray).astype(np.float32) / 255.0
+
+        textures.append(mask)
+
+    logger.info(f"已加载 {len(textures)} 个笔触纹理")
+    return textures
 
 
 def create_color_blocks(
@@ -98,6 +132,7 @@ def render_color_pointillism(
     jitter: int = 1,
     bg_color: tuple[int, int, int] = (240, 245, 245),  # 偏暖灰的纸张底色 (BGR格式)
     alpha: float = 0.5,  # 水彩透明度，0=完全透明，1=不透明
+    brush_textures: list[np.ndarray] | None = None,
 ) -> np.ndarray:
     """
     第三阶段：水彩渲染
@@ -130,27 +165,62 @@ def render_color_pointillism(
             offset_x = random.randint(-jitter, jitter)
             offset_y = random.randint(-jitter, jitter)
 
-            # 引入笔触大小微小变化
-            r = base_radius + random.randint(0, 1)
-
             final_x = center_x + offset_x
             final_y = center_y + offset_y
 
-            # 局部 patch 边界（含边缘模糊扩展）
-            pad = r + 2
-            y1, y2 = max(0, final_y - pad), min(canvas_h, final_y + pad + 1)
-            x1, x2 = max(0, final_x - pad), min(canvas_w, final_x + pad + 1)
-            if y1 >= y2 or x1 >= x2:
-                continue
+            # 引入笔触大小微小变化
+            r = base_radius + random.randint(0, 1)
 
-            patch_h, patch_w = y2 - y1, x2 - x1
-            local_cx, local_cy = final_x - x1, final_y - y1
+            if brush_textures:
+                # 随机选一个笔触并进行随机旋转和缩放
+                texture = random.choice(brush_textures)
+                angle = random.uniform(0, 360)
+                # 将 texture 缩放到 size 约等于 r*3
+                size = r * 3
+                
+                # 旋转矩阵逻辑：
+                # 1. 原始纹理中心 (tw/2, th/2)
+                # 2. 目标 patch 中心 (patch_size/2, patch_size/2)
+                th, tw = texture.shape[:2]
+                patch_size = int(size * 1.5)
+                m_rot = cv2.getRotationMatrix2D((tw / 2, th / 2), angle, size / max(th, tw))
+                
+                # 关键修正：调整平移分量，使原始纹理中心映射到 patch 中心
+                m_rot[0, 2] += (patch_size / 2) - (tw / 2)
+                m_rot[1, 2] += (patch_size / 2) - (th / 2)
+                
+                soft_mask = cv2.warpAffine(texture, m_rot, (patch_size, patch_size), flags=cv2.INTER_LINEAR) * alpha
+                
+                local_cx, local_cy = patch_size // 2, patch_size // 2
+                y1, y2 = max(0, final_y - local_cy), min(canvas_h, final_y - local_cy + patch_size)
+                x1, x2 = max(0, final_x - local_cx), min(canvas_w, final_x - local_cx + patch_size)
+                
+                if y1 >= y2 or x1 >= x2:
+                    continue
+                    
+                # 裁剪 mask 以匹配画布边缘
+                mask_y1 = y1 - (final_y - local_cy)
+                mask_y2 = mask_y1 + (y2 - y1)
+                mask_x1 = x1 - (final_x - local_cx)
+                mask_x2 = mask_x1 + (x2 - x1)
+                
+                soft_mask = soft_mask[mask_y1:mask_y2, mask_x1:mask_x2]
+            else:
+                # 局部 patch 边界（含边缘模糊扩展）
+                pad = r + 2
+                y1, y2 = max(0, final_y - pad), min(canvas_h, final_y + pad + 1)
+                x1, x2 = max(0, final_x - pad), min(canvas_w, final_x + pad + 1)
+                if y1 >= y2 or x1 >= x2:
+                    continue
 
-            # 圆形遮罩 → Gaussian 软化边缘 → 乘以 alpha
-            hard_mask = np.zeros((patch_h, patch_w), dtype=np.float32)
-            cv2.circle(hard_mask, (local_cx, local_cy), r, 1.0, -1)
-            ksize = r * 2 + 1
-            soft_mask = cv2.GaussianBlur(hard_mask, (ksize, ksize), r / 2) * alpha
+                patch_h, patch_w = y2 - y1, x2 - x1
+                local_cx, local_cy = final_x - x1, final_y - y1
+
+                # 圆形遮罩 → Gaussian 软化边缘 → 乘以 alpha
+                hard_mask = np.zeros((patch_h, patch_w), dtype=np.float32)
+                cv2.circle(hard_mask, (local_cx, local_cy), r, 1.0, -1)
+                ksize = r * 2 + 1
+                soft_mask = cv2.GaussianBlur(hard_mask, (ksize, ksize), r / 2) * alpha
 
             # 将颜色 alpha 混合到画布（颜色渗透，不是覆盖）
             dot_color = pixel_color.astype(np.float32)
