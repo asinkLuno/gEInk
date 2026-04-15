@@ -287,12 +287,19 @@ def pointillize(
     default=20,
     help="Trigger threshold for edge detection (lower = more lines)",
 )
+@click.option(
+    "--info-panel",
+    is_flag=True,
+    default=False,
+    help="Add an information panel to the right of the image",
+)
 def ascii_art(
     input_path: str,
     cell_height: int,
     input_height: int | None,
     grabcut: bool,
     edge_threshold: int,
+    info_panel: bool,
 ) -> None:
     """
     Convert image to ASCII art using Sarasa Gothic font.
@@ -301,7 +308,7 @@ def ascii_art(
     Use --grabcut to strip background before edge detection.
 
     Examples:
-        geink ascii-art photo.jpg
+        geink ascii-art photo.jpg --info-panel
     """
     input_file = Path(input_path)
     img = cv2.imread(str(input_file))
@@ -323,6 +330,7 @@ def ascii_art(
         edge_threshold=edge_threshold,
         out_dir=out_dir,
         stem=input_file.stem,
+        info_panel=info_panel,
     )
 
     final_out = out_dir / f"{input_file.stem}_ascii.png"

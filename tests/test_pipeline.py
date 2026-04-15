@@ -108,6 +108,39 @@ def test_ascii_art_09(tmp_path: Any):
 
 
 @pytest.mark.test_img
+def test_ascii_art_info_panel(tmp_path: Any):
+    """Verify ascii-art with --info-panel flag produces a wider image."""
+    import shutil
+
+    import cv2
+
+    src = TESTS_DIR / "09.jpg"
+    img_path = tmp_path / "09.jpg"
+    shutil.copy(src, img_path)
+
+    # Run without panel
+    subprocess.run(
+        ["uv", "run", "geink", "ascii-art", str(img_path)],
+        capture_output=True,
+        text=True,
+    )
+    img_no_panel = cv2.imread(str(tmp_path / "09" / "09_ascii.png"))
+
+    # Run with panel
+    subprocess.run(
+        ["uv", "run", "geink", "ascii-art", str(img_path), "--info-panel"],
+        capture_output=True,
+        text=True,
+    )
+    img_with_panel = cv2.imread(str(tmp_path / "09" / "09_ascii.png"))
+
+    assert img_no_panel is not None
+    assert img_with_panel is not None
+    assert img_with_panel.shape[1] > img_no_panel.shape[1], "Info panel was not added"
+    assert img_with_panel.shape[0] == img_no_panel.shape[0], "Height should be the same"
+
+
+@pytest.mark.test_img
 def test_pointillize(test_images: Path):
     """Verify pointillize command."""
     test_img = test_images / "test.jpg"
