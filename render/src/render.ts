@@ -89,8 +89,8 @@ function escapeHtml(text: string): string {
 function bbsHeaderHtml(): string {
   return `
 <div class="bbs-header">
-  <span class="white">歡迎來臨 </span><span class="orange">5525</span><span class="white"> 回到第一天 [目前共有 </span><span class="yellow">5525</span><span class="white"> 人上線]</span><br>
-  <span class="white">請輸入代號 (試用請輸入 '</span><span class="green">guest</span><span class="white">'，注冊請輸入 '</span><span class="green">new</span><span class="white">') ：</span><span class="yellow">mayday</span><br>
+  <span class="white">歡迎光臨 </span><span class="orange">5525</span><span class="white"> 回到第一天 [目前共有 </span><span class="yellow">5525</span><span class="white"> 人上線]</span><br>
+  <span class="white">請輸入代號 (試用請輸入 \`</span><span class="green">guest</span><span class="white">\`，注冊請輸入 \`</span><span class="green">new</span><span class="white">\`) ：</span><span class="yellow">plumage</span><br>
   <span class="white">請輸入密碼：</span><span class="white">*******</span>
 </div>`;
 }
@@ -282,11 +282,11 @@ async function render(
       const naturalH  = frame.scrollHeight;
 
       // From 70% rule
-      const hFromPre  = Math.ceil(preH / 0.5);
-      const wFromPre  = Math.ceil(hFromPre * 4 / 3);  // landscape 4:3
+      const hFromPre  = Math.ceil(preH / 0.8);
+      const wFromPre  = Math.ceil(hFromPre * 3 / 4);  // portrait 3:4
 
-      // From 4:3 rule applied to natural content width
-      const hFromW    = Math.ceil(naturalW * 3 / 4);
+      // From 3:4 rule applied to natural content width
+      const hFromW    = Math.ceil(naturalW * 4 / 3);
       const wFromW    = naturalW;
 
       // Pick whichever is larger so both constraints are satisfied
