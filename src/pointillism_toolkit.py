@@ -1,8 +1,6 @@
 import numpy as np
 import cv2
 import random
-import sys
-import os
 from loguru import logger
 
 # Atkinson 误差扩散矩阵 (dy, dx, weight)
@@ -17,23 +15,30 @@ ATKINSON_KERNEL = [
 
 # 用户定义的调色板 (注意: OpenCV 默认读取和显示均为 BGR 格式)
 # 这里的颜色必须以 BGR 顺序排列
-DEFAULT_PALETTE = np.array([
-    [0, 0, 0],          # Black
-    [255, 255, 255],    # White
-    [0, 0, 200],        # Red (沉稳红 B=0, G=0, R=200)
-    [0, 160, 0],        # Green (森林绿)
-    [160, 0, 0],        # Blue (深海蓝)
-    [0, 220, 255],      # Yellow (明黄)
-    [0, 110, 255]       # Orange (活力橙)
-], dtype=np.float32)
+DEFAULT_PALETTE = np.array(
+    [
+        [0, 0, 0],  # Black
+        [255, 255, 255],  # White
+        [0, 0, 200],  # Red (沉稳红 B=0, G=0, R=200)
+        [0, 160, 0],  # Green (森林绿)
+        [160, 0, 0],  # Blue (深海蓝)
+        [0, 220, 255],  # Yellow (明黄)
+        [0, 110, 255],  # Orange (活力橙)
+    ],
+    dtype=np.float32,
+)
 
 
-def create_color_blocks(img: np.ndarray, spatial_rad: int = 15, color_rad: int = 40) -> np.ndarray:
+def create_color_blocks(
+    img: np.ndarray, spatial_rad: int = 15, color_rad: int = 40
+) -> np.ndarray:
     """
     第一阶段：底稿概括
     使用均值漂移滤波抹平细碎纹理，保留结构边缘，划分出明确的大色块。
     """
-    logger.info(f"正在进行平滑减色处理 (空间半径:{spatial_rad}, 色彩半径:{color_rad})...这可能需要几秒钟")
+    logger.info(
+        f"正在进行平滑减色处理 (空间半径:{spatial_rad}, 色彩半径:{color_rad})...这可能需要几秒钟"
+    )
     shifted = cv2.pyrMeanShiftFiltering(img, sp=spatial_rad, sr=color_rad)
     return shifted
 
@@ -58,17 +63,17 @@ def color_atkinson_dithering(color_img: np.ndarray, palette: np.ndarray) -> np.n
     for y in range(height):
         for x in range(width):
             old_pixel = dithered[y, x].copy()
-            
+
             # 寻找调色板中最接近的颜色
             new_pixel = find_closest_palette_color(old_pixel, palette)
             dithered[y, x] = new_pixel
-            
+
             # 计算三通道误差向量 (B, G, R 的偏差)
             error = old_pixel - new_pixel
-            
+
             if np.all(error == 0):
                 continue
-                
+
             # 将色彩误差扩散给尚未处理的周围像素
             for dy, dx, w in ATKINSON_KERNEL:
                 ny, nx = y + dy, x + dx
@@ -79,45 +84,47 @@ def color_atkinson_dithering(color_img: np.ndarray, palette: np.ndarray) -> np.n
 
 
 def render_color_pointillism(
-    dithered_img: np.ndarray, 
-    scale: int = 4, 
-    base_radius: int = 3, 
+    dithered_img: np.ndarray,
+    scale: int = 4,
+    base_radius: int = 3,
     jitter: int = 1,
-    bg_color: tuple = (240, 245, 245)  # 偏暖灰的纸张底色 (BGR格式)
+    bg_color: tuple = (240, 245, 245),  # 偏暖灰的纸张底色 (BGR格式)
 ) -> np.ndarray:
     """
     第三阶段：物理笔触渲染
     将生成的数字像素矩阵渲染为带有颜料重叠、大小差异和手绘随机性的画作。
     """
     height, width, _ = dithered_img.shape
-    
+
     # 创建高分辨率的彩色空白画布
     canvas = np.full((height * scale, width * scale, 3), bg_color, dtype=np.uint8)
-    
-    logger.info(f"开始渲染彩色点彩效果... (放大倍数: {scale}x, 基础半径: {base_radius})")
-    
+
+    logger.info(
+        f"开始渲染彩色点彩效果... (放大倍数: {scale}x, 基础半径: {base_radius})"
+    )
+
     for y in range(height):
         for x in range(width):
             color = dithered_img[y, x].tolist()
-            
+
             # 跳过纯白色，利用“留白”透出画布底层纸张的颜色
             if color == [255.0, 255.0, 255.0]:
                 continue
-                
+
             # 计算在高分辨率画布上的基础中心坐标
             center_x = x * scale + scale // 2
             center_y = y * scale + scale // 2
-            
+
             # 引入位置随机偏移 (打破机械排布)
             offset_x = random.randint(-jitter, jitter)
             offset_y = random.randint(-jitter, jitter)
-            
+
             # 引入笔触大小微小变化
             r = base_radius + random.randint(0, 1)
-            
+
             final_x = center_x + offset_x
             final_y = center_y + offset_y
-            
+
             dot_color = (int(color[0]), int(color[1]), int(color[2]))
             # 绘制实心圆点
             cv2.circle(canvas, (final_x, final_y), r, dot_color, -1)

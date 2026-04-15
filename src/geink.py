@@ -21,12 +21,13 @@ logger.remove()
 logger.add(lambda msg: print(msg, end=""), format="{message}")
 
 # Try to import requests, but handle gracefully if not installed
+REQUESTS_AVAILABLE = False
 try:
     import requests
 
     REQUESTS_AVAILABLE = True
 except ImportError:
-    REQUESTS_AVAILABLE = False
+    pass
 
 # Supported image extensions
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"}
@@ -94,7 +95,9 @@ def process(input_path, output_path, width, height, method):
                 continue
             bin_out = img_file.with_suffix(".bin")
             preview_out = img_file.with_name(img_file.stem + "_preview.png")
-            if _process_image(str(img_file), bin_out, preview_out, width, height, method):
+            if _process_image(
+                str(img_file), bin_out, preview_out, width, height, method
+            ):
                 count += 1
         logger.success(f"Processed {count} images in {input_obj}")
 
@@ -128,13 +131,33 @@ def gridcut(input_path, rows, cols):
 @cli.command()
 @click.argument("input_path", type=click.Path(exists=True))
 @click.argument("output_path", type=click.Path(), required=False)
-@click.option("--spatial-rad", type=int, default=15, help="Mean-shift spatial radius for color blocking")
-@click.option("--color-rad", type=int, default=40, help="Mean-shift color radius for color blocking")
-@click.option("--scale", "-s", type=int, default=5, help="Canvas upscale factor (grid spacing)")
-@click.option("--dot-radius", "-r", type=int, default=4, help="Base dot radius in pixels")
-@click.option("--jitter", "-j", type=int, default=2, help="Max random offset per dot in pixels")
-@click.option("--max-dim", type=int, default=600, help="Resize input so longest side ≤ this value")
-def pointillize(input_path, output_path, spatial_rad, color_rad, scale, dot_radius, jitter, max_dim):
+@click.option(
+    "--spatial-rad",
+    type=int,
+    default=15,
+    help="Mean-shift spatial radius for color blocking",
+)
+@click.option(
+    "--color-rad",
+    type=int,
+    default=40,
+    help="Mean-shift color radius for color blocking",
+)
+@click.option(
+    "--scale", "-s", type=int, default=5, help="Canvas upscale factor (grid spacing)"
+)
+@click.option(
+    "--dot-radius", "-r", type=int, default=4, help="Base dot radius in pixels"
+)
+@click.option(
+    "--jitter", "-j", type=int, default=2, help="Max random offset per dot in pixels"
+)
+@click.option(
+    "--max-dim", type=int, default=600, help="Resize input so longest side ≤ this value"
+)
+def pointillize(
+    input_path, output_path, spatial_rad, color_rad, scale, dot_radius, jitter, max_dim
+):
     """
     Convert image(s) to color pointillism art.
 
@@ -154,19 +177,31 @@ def pointillize(input_path, output_path, spatial_rad, color_rad, scale, dot_radi
 
         if max(img.shape[:2]) > max_dim:
             factor = max_dim / max(img.shape[:2])
-            img = cv2.resize(img, (int(img.shape[1] * factor), int(img.shape[0] * factor)), interpolation=cv2.INTER_AREA)
+            img = cv2.resize(
+                img,
+                (int(img.shape[1] * factor), int(img.shape[0] * factor)),
+                interpolation=cv2.INTER_AREA,
+            )
 
-        logger.info(f"Pointillizing {img_file.name} {img.shape[1]}x{img.shape[0]} → ×{scale}...")
+        logger.info(
+            f"Pointillizing {img_file.name} {img.shape[1]}x{img.shape[0]} → ×{scale}..."
+        )
         blocked = create_color_blocks(img, spatial_rad=spatial_rad, color_rad=color_rad)
         dithered = color_atkinson_dithering(blocked, DEFAULT_PALETTE)
-        art = render_color_pointillism(dithered, scale=scale, base_radius=dot_radius, jitter=jitter)
+        art = render_color_pointillism(
+            dithered, scale=scale, base_radius=dot_radius, jitter=jitter
+        )
 
         cv2.imwrite(str(out_file), art)
         logger.success(f"Art saved to: {out_file}")
         return True
 
     if input_obj.is_file():
-        out = Path(output_path) if output_path else input_obj.with_name(input_obj.stem + "_pointillism.png")
+        out = (
+            Path(output_path)
+            if output_path
+            else input_obj.with_name(input_obj.stem + "_pointillism.png")
+        )
         process_one(input_obj, out)
     else:
         count = 0
@@ -207,7 +242,9 @@ def upload(bin_path, host):
         if response.status_code == 200:
             logger.success(f"Uploaded {bin_file.name}")
         else:
-            logger.error(f"Upload failed: {response.status_code} {response.text.strip()}")
+            logger.error(
+                f"Upload failed: {response.status_code} {response.text.strip()}"
+            )
     except requests.exceptions.RequestException as e:
         logger.error(f"Network error: {e}")
 

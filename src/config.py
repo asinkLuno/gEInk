@@ -1,6 +1,7 @@
 # config.py
 import math
 import os
+from typing import TypeVar
 
 from dotenv import dotenv_values
 
@@ -12,8 +13,10 @@ DEFAULT_TARGET_WIDTH = 800
 DEFAULT_TARGET_HEIGHT = 480
 DEFAULT_COLOR_LEVELS = 2  # 1-bit (2 levels)
 
+T = TypeVar("T")
 
-def get_config_value(key, default, type_cast=str):
+
+def get_config_value(key, default, type_cast):
     """Get a configuration value, prioritizing environment variables."""
     value = os.getenv(key) or config.get(key)
     if value is None:
@@ -29,15 +32,17 @@ def get_config_value(key, default, type_cast=str):
 
 TARGET_WIDTH = get_config_value("GEINK_TARGET_WIDTH", DEFAULT_TARGET_WIDTH, int)
 TARGET_HEIGHT = get_config_value("GEINK_TARGET_HEIGHT", DEFAULT_TARGET_HEIGHT, int)
-COLOR_LEVELS = get_config_value("GEINK_COLOR_LEVELS", DEFAULT_COLOR_LEVELS, int)
+_color_levels = get_config_value("GEINK_COLOR_LEVELS", DEFAULT_COLOR_LEVELS, int)
 
 # Validate COLOR_LEVELS
-if not (2 <= COLOR_LEVELS <= 256 and (COLOR_LEVELS & (COLOR_LEVELS - 1) == 0)):
+if not (2 <= _color_levels <= 256 and (_color_levels & (_color_levels - 1) == 0)):
     print(
-        f"Error: GEINK_COLOR_LEVELS must be a power of 2 between 2 and 256. Found: {COLOR_LEVELS}"
+        f"Error: GEINK_COLOR_LEVELS must be a power of 2 between 2 and 256. Found: {_color_levels}"
     )
-    COLOR_LEVELS = DEFAULT_COLOR_LEVELS
-    print(f"Using default GEINK_COLOR_LEVELS: {COLOR_LEVELS}")
+    _color_levels = DEFAULT_COLOR_LEVELS
+    print(f"Using default GEINK_COLOR_LEVELS: {_color_levels}")
+
+COLOR_LEVELS: int = _color_levels
 
 # Calculate bits per pixel
 BITS_PER_PIXEL = int(math.log2(COLOR_LEVELS))

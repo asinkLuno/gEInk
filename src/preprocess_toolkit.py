@@ -39,7 +39,12 @@ def detect_object_bounds(img: np.ndarray, bg_color: np.ndarray, threshold: int =
 
     pad = 5
     h, w = img.shape[:2]
-    return max(0, left - pad), min(w, right + 1 + pad), max(0, top - pad), min(h, bottom + 1 + pad)
+    return (
+        max(0, left - pad),
+        min(w, right + 1 + pad),
+        max(0, top - pad),
+        min(h, bottom + 1 + pad),
+    )
 
 
 def crop_to_target_ratio(img: np.ndarray, target_ratio: float) -> np.ndarray:
@@ -72,17 +77,27 @@ def pad_to_ratio(img: np.ndarray, target_ratio: float) -> np.ndarray:
         pad_right = new_w - w - pad_left
         pad_top = pad_bottom = 0
     return cv2.copyMakeBorder(
-        img, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=bg_color.tolist()
+        img,
+        pad_top,
+        pad_bottom,
+        pad_left,
+        pad_right,
+        cv2.BORDER_CONSTANT,
+        value=bg_color.tolist(),
     )
 
 
 def resize_to_target(img: np.ndarray, target_width, target_height) -> np.ndarray:
     if img.shape[0] > img.shape[1]:
         img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
-    return cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_LANCZOS4)
+    return cv2.resize(
+        img, (target_width, target_height), interpolation=cv2.INTER_LANCZOS4
+    )
 
 
-def _preprocess_image(input_image_path, target_width=TARGET_WIDTH, target_height=TARGET_HEIGHT):
+def _preprocess_image(
+    input_image_path, target_width=TARGET_WIDTH, target_height=TARGET_HEIGHT
+):
     img = cv2.imread(input_image_path)
     if img is None:
         logger.error(f"错误: 无法读取图片 {input_image_path}")
@@ -96,7 +111,9 @@ def _preprocess_image(input_image_path, target_width=TARGET_WIDTH, target_height
     logger.info(f"裁切后尺寸: {cropped.shape[1]}x{cropped.shape[0]}")
 
     h, w = cropped.shape[:2]
-    target_ratio = target_width / target_height if w >= h else target_height / target_width
+    target_ratio = (
+        target_width / target_height if w >= h else target_height / target_width
+    )
 
     if is_solid_background(cropped):
         logger.info("背景为纯色，进行Padding到指定比例...")
