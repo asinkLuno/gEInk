@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 TEST_IMG_DIR = Path("./test_img")
+TESTS_DIR = Path(__file__).parent
 
 
 @pytest.fixture
@@ -80,6 +81,27 @@ def test_ascii_art(test_images: Path):
 
     out_file = test_images / "test_ascii.png"
     assert out_file.exists(), "ASCII art output file not found"
+
+
+@pytest.mark.test_img
+def test_ascii_art_09(tmp_path: Any):
+    """ascii-art command on tests/09.jpg produces a non-empty output image."""
+    import shutil
+
+    src = TESTS_DIR / "09.jpg"
+    img = tmp_path / "09.jpg"
+    shutil.copy(src, img)
+
+    result = subprocess.run(
+        ["uv", "run", "geink", "ascii-art", str(img)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"ascii-art failed:\n{result.stderr}"
+
+    out_file = tmp_path / "09" / "09_ascii.png"
+    assert out_file.exists(), "ASCII art output not found"
+    assert out_file.stat().st_size > 0, "ASCII art output is empty"
 
 
 @pytest.mark.test_img

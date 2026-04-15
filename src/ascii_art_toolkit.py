@@ -1,11 +1,38 @@
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-SARASA_FONT_PATH = "/usr/share/fonts/sarasa-gothic/Sarasa-Regular.ttc"
+if TYPE_CHECKING:
+    from controlnet_aux import HEDdetector
+
+_hed: Optional["HEDdetector"] = None
+
+
+def _get_hed() -> "HEDdetector":
+    global _hed
+    if _hed is None:
+        from controlnet_aux import HEDdetector
+
+        _hed = HEDdetector.from_pretrained("lllyasviel/Annotators")
+    return _hed
+
+
+def _hed_edges(gray: np.ndarray) -> np.ndarray:
+    """Return a soft edge map via HED — clean, noise-free, same spatial size as input."""
+    h, w = gray.shape
+    rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+    pil_in = Image.fromarray(rgb)
+    long_side = max(h, w)
+    pil_out = _get_hed()(pil_in, detect_resolution=long_side, image_resolution=long_side)
+    edge = np.array(pil_out.convert("L"))
+    if edge.shape != (h, w):
+        edge = cv2.resize(edge, (w, h), interpolation=cv2.INTER_LINEAR)
+    return edge
+
+SARASA_FONT_PATH = str(Path(__file__).parent.parent / "SarasaMonoSC-Regular.ttf")
 
 # Edge angle [0°, 180°) → straight-line chars
 # Canonical angles: 0°=horizontal, 45°=\, 90°=vertical, 135°=/
@@ -131,10 +158,9 @@ def render_ascii_art(
     Pipeline:
     1. Downscale to input_height (preserve aspect ratio)
     2. GrabCut foreground extraction (optional) — background set to white
-    3. Bilateral Filter for noise reduction while preserving edges
-    4. Canny edge detection (Dynamic thresholds) + Sobel gradients
-    5. Per cell: classify edge char, space for non-edge
-    6. Render onto white canvas with Sarasa Gothic
+    3. HED edge detection (clean, noise-free) + Sobel gradients for direction
+    4. Per cell: classify edge char, space for non-edge
+    5. Render onto white canvas with Sarasa Gothic
     """
     font = ImageFont.truetype(SARASA_FONT_PATH, cell_height)
 
@@ -159,23 +185,13 @@ def render_ascii_art(
     if out_dir is not None:
         cv2.imwrite(str(out_dir / f"{stem}_gray.png"), gray)
 
-    # === 优化点 1：使用双边滤波替换原本激进的锐化，保边去噪 ===
-    gray = cv2.bilateralFilter(gray, d=7, sigmaColor=75, sigmaSpace=75)
-
-    if out_dir is not None:
-        cv2.imwrite(str(out_dir / f"{stem}_bilateral.png"), gray)
-
     h, w = gray.shape
     grid_rows = max(1, h // cell_h)
     grid_cols = max(1, w // cell_w)
 
     resized = cv2.resize(gray, (int(grid_cols * cell_w), int(grid_rows * cell_h)))
 
-    # === 优化点 2：动态计算 Canny 阈值，提高边缘提取的标准 ===
-    median_val = np.median(resized)
-    lower_thresh = int(max(0, (1.0 - 0.33) * median_val))
-    upper_thresh = int(min(255, (1.0 + 0.33) * median_val))
-    edges = cv2.Canny(resized, lower_thresh, upper_thresh)
+    edges = _hed_edges(resized)
 
     if out_dir is not None:
         cv2.imwrite(str(out_dir / f"{stem}_edges.png"), edges)
@@ -193,8 +209,6 @@ def render_ascii_art(
         for col in range(grid_cols):
             x0, x1 = col * cell_w, (col + 1) * cell_w
 
-            # === 优化点 3：提高触发阈值，增加画面留白 ===
-            # 此处可以根据你的实际图片效果微调，数字越大线条越少、留白越多 (建议区间 15 ~ 30)
             if edges[y0:y1, x0:x1].mean() > 20:
                 char = _classify_edge_cell(gx[y0:y1, x0:x1], gy[y0:y1, x0:x1], cell_h)
             else:
