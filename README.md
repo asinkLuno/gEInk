@@ -97,7 +97,38 @@ geink convert path/to/image_dithered.png [output.bin]
 geink convert path/to/images/
 ```
 
-### 4. 上传图像到设备 (`upload`)
+### 4. 彩色点彩艺术 (`pointillize`)
+
+将图片转换为彩色点彩风格艺术图。三阶段流水线：均值漂移色块概括 → 7色 Atkinson 抖动 → 点彩渲染。
+
+```bash
+# 处理单个文件（默认输出 <name>_pointillism.png）
+geink pointillize photo.jpg
+
+# 指定输出路径
+geink pointillize photo.jpg output.png
+
+# 调整点彩风格
+geink pointillize photo.jpg --scale 6 --dot-radius 5 --jitter 3
+
+# 批量处理目录
+geink pointillize ./photos/
+```
+
+**参数说明：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `INPUT_PATH` | (必填) | 输入图片文件或目录 |
+| `OUTPUT_PATH` | (自动生成) | 输出图片路径，可选 |
+| `--spatial-rad` | `15` | 均值漂移空间半径，越大色块越粗 |
+| `--color-rad` | `40` | 均值漂移色彩半径，越大颜色越少 |
+| `--scale` / `-s` | `5` | 画布放大倍数（网格间距） |
+| `--dot-radius` / `-r` | `4` | 基础点半径（>scale 时点会互相重叠） |
+| `--jitter` / `-j` | `2` | 点坐标最大随机偏移（打破机械排布） |
+| `--max-dim` | `600` | 输入图片最长边限制，防止处理过慢 |
+
+### 5. 上传图像到设备 (`upload`)
 
 将 `.bin` 文件通过 HTTP 分块上传到 ESP8266 e-paper display。
 

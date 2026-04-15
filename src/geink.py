@@ -9,7 +9,12 @@ from .config import TARGET_HEIGHT, TARGET_WIDTH
 from .dithering_toolkit import apply_dithering
 from .grid_cutter import _grid_cut_image
 from .preprocess_toolkit import _preprocess_image
-from .pointillism_toolkit import render_pointillism
+from .pointillism_toolkit import (
+    DEFAULT_PALETTE,
+    color_atkinson_dithering,
+    create_color_blocks,
+    render_color_pointillism,
+)
 
 # Configure loguru to write to stdout for Click CLI testing
 logger.remove()
@@ -123,16 +128,21 @@ def gridcut(input_path, rows, cols):
 @cli.command()
 @click.argument("input_path", type=click.Path(exists=True))
 @click.argument("output_path", type=click.Path(), required=False)
-@click.option("--scale", "-s", type=int, default=4, help="Grid upscale factor (controls output resolution)")
-@click.option("--dot-radius", "-r", type=int, default=3, help="Base dot radius in pixels")
-@click.option("--jitter", "-j", type=int, default=1, help="Max random offset per dot in pixels")
-@click.option("--bg-color", type=int, default=245, help="Background gray value (0-255)")
-@click.option("--dot-color", type=int, default=30, help="Dot gray value (0-255)")
-@click.option("--dither", type=click.Choice(["atkinson", "binary_threshold"]), default="atkinson", help="Dithering method")
-@click.option("--width", "-w", type=int, default=600, help="Input resize width before dithering")
-def pointillize(input_path, output_path, scale, dot_radius, jitter, bg_color, dot_color, dither, width):
+@click.option("--spatial-rad", type=int, default=15, help="Mean-shift spatial radius for color blocking")
+@click.option("--color-rad", type=int, default=40, help="Mean-shift color radius for color blocking")
+@click.option("--scale", "-s", type=int, default=5, help="Canvas upscale factor (grid spacing)")
+@click.option("--dot-radius", "-r", type=int, default=4, help="Base dot radius in pixels")
+@click.option("--jitter", "-j", type=int, default=2, help="Max random offset per dot in pixels")
+@click.option("--max-dim", type=int, default=600, help="Resize input so longest side ≤ this value")
+def pointillize(input_path, output_path, spatial_rad, color_rad, scale, dot_radius, jitter, max_dim):
     """
-    Convert image(s) to pointillism art via Atkinson dithering + overlapping dot rendering.
+    Convert image(s) to color pointillism art.
+
+    Pipeline: mean-shift color blocking → 7-color Atkinson dithering → overlapping dot rendering.
+
+    Examples:
+        geink pointillize photo.jpg
+        geink pointillize photo.jpg out.png --scale 6 --dot-radius 5
     """
     input_obj = Path(input_path)
 
@@ -142,14 +152,14 @@ def pointillize(input_path, output_path, scale, dot_radius, jitter, bg_color, do
             logger.error(f"Cannot read {img_file}")
             return False
 
-        h, w = img.shape[:2]
-        height = int(h * (width / w))
-        img_resized = cv2.resize(img, (width, height), interpolation=cv2.INTER_AREA)
-        gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
+        if max(img.shape[:2]) > max_dim:
+            factor = max_dim / max(img.shape[:2])
+            img = cv2.resize(img, (int(img.shape[1] * factor), int(img.shape[0] * factor)), interpolation=cv2.INTER_AREA)
 
-        logger.info(f"Pointillizing {img_file.name} ({width}x{height} → ×{scale})...")
-        dithered = apply_dithering(gray, dither_method=dither)
-        art = render_pointillism(dithered, scale=scale, base_radius=dot_radius, jitter=jitter, bg_color=bg_color, dot_color=dot_color)
+        logger.info(f"Pointillizing {img_file.name} {img.shape[1]}x{img.shape[0]} → ×{scale}...")
+        blocked = create_color_blocks(img, spatial_rad=spatial_rad, color_rad=color_rad)
+        dithered = color_atkinson_dithering(blocked, DEFAULT_PALETTE)
+        art = render_color_pointillism(dithered, scale=scale, base_radius=dot_radius, jitter=jitter)
 
         cv2.imwrite(str(out_file), art)
         logger.success(f"Art saved to: {out_file}")
