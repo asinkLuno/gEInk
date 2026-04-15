@@ -6,6 +6,7 @@ import numpy as np
 import requests
 from loguru import logger
 
+from .ascii_art_toolkit import render_ascii_art
 from .config import TARGET_HEIGHT, TARGET_WIDTH
 from .dithering_toolkit import apply_dithering
 from .grid_cutter import grid_cut_image
@@ -227,6 +228,51 @@ def pointillize(
             if process_one(img_file, out):
                 count += 1
         logger.success(f"Generated {count} art pieces in {input_obj}")
+
+
+@cli.command("ascii-art")
+@click.argument("input_path", type=click.Path(exists=True))
+@click.argument("output_path", type=click.Path(), required=False)
+@click.option(
+    "--cell-height", "-c", type=int, default=12, help="Font cell height in pixels"
+)
+@click.option(
+    "--input-height",
+    "-i",
+    type=int,
+    default=400,
+    help="Downscale input to this height before processing",
+)
+def ascii_art(
+    input_path: str, output_path: str | None, cell_height: int, input_height: int
+) -> None:
+    """
+    Convert image to ASCII art using Sarasa Gothic font.
+
+    Edges are drawn with - | / \\ _ characters based on gradient direction.
+    Non-edge areas are filled with density characters by grayscale brightness.
+
+    Examples:
+        geink ascii-art photo.jpg
+        geink ascii-art photo.jpg out.png --cell-height 10
+    """
+    img = cv2.imread(input_path)
+    if img is None:
+        logger.error(f"Cannot read {input_path}")
+        return
+
+    logger.info(
+        f"Rendering ASCII art for {Path(input_path).name} (cell_height={cell_height})..."
+    )
+    result = render_ascii_art(img, cell_height=cell_height, input_height=input_height)
+
+    out = (
+        Path(output_path)
+        if output_path
+        else Path(input_path).with_name(Path(input_path).stem + "_ascii.png")
+    )
+    _ = cv2.imwrite(str(out), result)
+    logger.success(f"ASCII art saved to: {out}")
 
 
 @cli.command()

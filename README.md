@@ -292,3 +292,7 @@ arduino-cli upload -p /dev/ttyUSB0 --fqbn esp8266:esp8266:generic /home/guozr/CO
 |------|--------|------|------|
 | RAM (全局/静态) | ~32 KB | 80 KB | ~40% |
 | Flash (代码) | ~280 KB | 1 MB | ~28% |
+
+# TODO
+
+1. `SAM` 语义分割
