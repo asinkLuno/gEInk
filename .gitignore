@@ -28,6 +28,7 @@ E-Paper_ESP8266_Driver_Board_Code/
 # Output directories
 processed_images/
 *.bin
+node_modules/
 
 # Generated C header files for ESPSlider
 ESPSlider/image*.h

@@ -6,7 +6,7 @@ import numpy as np
 import requests
 from loguru import logger
 
-from .ascii_art_toolkit import render_ascii_art
+from .ascii_art_toolkit import generate_ascii_art
 from .config import IMAGE_EXTENSIONS, TARGET_HEIGHT, TARGET_WIDTH
 from .dithering_toolkit import apply_dithering
 from .edge_cutter import edge_cut_cmd
@@ -265,14 +265,11 @@ def pointillize(
 @cli.command("ascii-art")
 @click.argument("input_path", type=click.Path(exists=True))
 @click.option(
-    "--cell-height", "-c", type=int, default=12, help="Font cell height in pixels"
-)
-@click.option(
     "--input-height",
     "-i",
     type=int,
     default=None,
-    help="Downscale input to this height before processing",
+    help="Downscale input to this height before processing (controls ASCII complexity)",
 )
 @click.option(
     "--grabcut",
@@ -287,28 +284,21 @@ def pointillize(
     default=20,
     help="Trigger threshold for edge detection (lower = more lines)",
 )
-@click.option(
-    "--info-panel",
-    is_flag=True,
-    default=False,
-    help="Add an information panel to the right of the image",
-)
 def ascii_art(
     input_path: str,
-    cell_height: int,
     input_height: int | None,
     grabcut: bool,
     edge_threshold: int,
-    info_panel: bool,
 ) -> None:
     """
-    Convert image to ASCII art using Sarasa Gothic font.
+    Convert image to ASCII art and save as .txt.
 
-    Edges are drawn with - | / \\ _ characters based on gradient direction.
-    Use --grabcut to strip background before edge detection.
+    Complexity is controlled by --input-height: taller input → more rows → finer detail.
+    Use render/ (TypeScript) to turn the .txt into a styled PNG.
 
     Examples:
-        geink ascii-art photo.jpg --info-panel
+        geink ascii-art photo.jpg -i 480
+        geink ascii-art photo.jpg -i 960 --grabcut
     """
     input_file = Path(input_path)
     img = cv2.imread(str(input_file))
@@ -320,23 +310,23 @@ def ascii_art(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(
-        f"Rendering ASCII art for {input_file.name} (cell_height={cell_height})..."
+        f"Generating ASCII art for {input_file.name}"
+        + (f" (input_height={input_height})" if input_height else "")
+        + "..."
     )
-    result = render_ascii_art(
+    generate_ascii_art(
         img,
-        cell_height=cell_height,
         input_height=input_height,
         grabcut=grabcut,
         edge_threshold=edge_threshold,
         out_dir=out_dir,
         stem=input_file.stem,
-        info_panel=info_panel,
     )
 
-    final_out = out_dir / f"{input_file.stem}_ascii.png"
-    _ = cv2.imwrite(str(final_out), result)
+    txt_out = out_dir / f"{input_file.stem}_ascii.txt"
     logger.success(f"Intermediate steps saved to: {out_dir}/")
-    logger.success(f"ASCII art saved to: {final_out}")
+    logger.success(f"ASCII art saved to: {txt_out}")
+    logger.info(f"Render to PNG: cd render && npx ts-node src/render.ts {txt_out}")
 
 
 @cli.command()

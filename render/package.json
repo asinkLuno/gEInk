@@ -1,0 +1,17 @@
+{
+  "name": "geink-render",
+  "version": "1.0.0",
+  "description": "Render ASCII art .txt files to styled PNG via headless Chrome",
+  "scripts": {
+    "build": "tsc",
+    "render": "ts-node src/render.ts"
+  },
+  "dependencies": {
+    "puppeteer": "^22.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.4.0"
+  }
+}
