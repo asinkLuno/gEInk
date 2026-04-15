@@ -19,11 +19,13 @@ def is_solid_background(img: np.ndarray, tolerance: int = 60) -> bool:
     if h < 2 or w < 2:
         return True
     corners = np.array([img[0, 0], img[0, w - 1], img[h - 1, 0], img[h - 1, w - 1]])
-    variance = np.mean(np.sum((corners - corners.mean(axis=0)) ** 2, axis=1))
-    return bool(variance < tolerance)
+    variance = float(np.mean(np.sum((corners - corners.mean(axis=0)) ** 2, axis=1)))
+    return variance < tolerance
 
 
-def detect_object_bounds(img: np.ndarray, bg_color: np.ndarray, threshold: int = 15):
+def detect_object_bounds(
+    img: np.ndarray, bg_color: np.ndarray, threshold: int = 15
+) -> tuple[int, int, int, int]:
     diff = img.astype(np.int32) - bg_color
     mask = np.sum(diff**2, axis=2) >= threshold**2
     rows = np.any(mask, axis=1)
@@ -87,7 +89,9 @@ def pad_to_ratio(img: np.ndarray, target_ratio: float) -> np.ndarray:
     )
 
 
-def resize_to_target(img: np.ndarray, target_width, target_height) -> np.ndarray:
+def resize_to_target(
+    img: np.ndarray, target_width: int, target_height: int
+) -> np.ndarray:
     if img.shape[0] > img.shape[1]:
         img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
     return cv2.resize(
@@ -95,9 +99,11 @@ def resize_to_target(img: np.ndarray, target_width, target_height) -> np.ndarray
     )
 
 
-def _preprocess_image(
-    input_image_path, target_width=TARGET_WIDTH, target_height=TARGET_HEIGHT
-):
+def preprocess_image(
+    input_image_path: str,
+    target_width: int = TARGET_WIDTH,
+    target_height: int = TARGET_HEIGHT,
+) -> np.ndarray | None:
     img = cv2.imread(input_image_path)
     if img is None:
         logger.error(f"错误: 无法读取图片 {input_image_path}")

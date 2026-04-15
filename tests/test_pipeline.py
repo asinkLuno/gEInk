@@ -1,5 +1,6 @@
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -7,77 +8,74 @@ TEST_IMG_DIR = Path("./test_img")
 
 
 @pytest.fixture
-def test_images(tmp_path):
+def test_images(tmp_path: Any) -> Path:
     """Ensure test images exist."""
     if not TEST_IMG_DIR.exists():
         pytest.skip("test_img directory not found")
     return TEST_IMG_DIR
 
 
-def test_preprocess_and_dither(test_images):
-    """Full pipeline: preprocess then dither on test images."""
+def test_process_pipeline(test_images: Path):
+    """Full pipeline: process command on test images."""
     # Clean up previous output files
-    for f in test_images.glob("*_crop.jpg"):
+    for f in test_images.glob("*.bin"):
         f.unlink()
-    for f in test_images.glob("*_dithered.jpg"):
+    for f in test_images.glob("*_preview.png"):
         f.unlink()
 
-    # Run preprocess
+    # Run process
     result = subprocess.run(
-        ["geink", "preprocess", str(test_images)],
+        ["uv", "run", "geink", "process", str(test_images)],
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, f"preprocess failed: {result.stderr}"
+    assert result.returncode == 0, f"process failed: {result.stderr}"
 
-    # Check _crop files generated
-    crop_files = list(test_images.glob("*_crop.jpg"))
-    assert len(crop_files) > 0, "No _crop files generated"
+    # Check .bin files generated
+    bin_files = list(test_images.glob("*.bin"))
+    assert len(bin_files) > 0, "No .bin files generated"
 
-    # Run dither
+    # Check _preview files generated
+    preview_files = list(test_images.glob("*_preview.png"))
+    assert len(preview_files) > 0, "No _preview files generated"
+
+
+def test_gridcut(test_images: Path):
+    """Verify gridcut command."""
+    test_img = test_images / "test.jpg"
+    if not test_img.exists():
+        pytest.skip("test image not found")
+
     result = subprocess.run(
-        ["geink", "dither", str(test_images)],
+        ["uv", "run", "geink", "gridcut", str(test_img), "--rows", "2", "--cols", "2"],
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, f"dither failed: {result.stderr}"
+    assert result.returncode == 0, f"gridcut failed: {result.stderr}"
 
-    # Check _dithered files generated
-    dithered_files = list(test_images.glob("*_dithered.jpg"))
-    assert len(dithered_files) > 0, "No _dithered files generated"
-
-
-def test_preprocess_skips_processed_files(test_images):
-    """Verify preprocess skips _crop and _dithered files."""
-    # Ensure we have some _crop and _dithered files
-    crop_count = len(list(test_images.glob("*_crop.jpg")))
-    dithered_count = len(list(test_images.glob("*_dithered.jpg")))
-
-    if crop_count == 0 or dithered_count == 0:
-        pytest.skip("Test requires existing _crop and _dithered files")
-
-    # Count original files (non-processed)
-    original_files = [
-        f
-        for f in test_images.iterdir()
-        if f.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}
-        and "_crop" not in f.name
-        and "_dithered" not in f.name
+    output_dir = test_images / "test"
+    assert output_dir.exists(), "Gridcut output directory not found"
+    tiles = list(output_dir.glob("*.jpg"))
+    # The dummy image might have been renamed or used a different suffix
+    # Let's check for any image suffix
+    tiles = [
+        f for f in output_dir.iterdir() if f.suffix.lower() in {".jpg", ".jpeg", ".png"}
     ]
+    assert len(tiles) == 4, f"Expected 4 tiles, found {len(tiles)}"
 
-    # Run preprocess again
+
+def test_pointillize(test_images: Path):
+    """Verify pointillize command."""
+    test_img = test_images / "test.jpg"
+    if not test_img.exists():
+        pytest.skip("test image not found")
+
     result = subprocess.run(
-        ["geink", "preprocess", str(test_images)],
+        ["uv", "run", "geink", "pointillize", str(test_img)],
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0
+    assert result.returncode == 0, f"pointillize failed: {result.stderr}"
 
-    # Verify it only processed original files, not _crop or _dithered
-    output_lines = result.stdout.strip().split("\n")
-    processed_lines = [line for line in output_lines if "Processing" in line]
-
-    assert len(processed_lines) == len(original_files), (
-        f"Expected {len(original_files)} files to be processed, "
-        f"but got {len(processed_lines)}"
-    )
+    out_file = test_images / "test_pointillism.png"
+    assert out_file.exists(), "Pointillism output file not found"

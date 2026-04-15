@@ -1,7 +1,6 @@
-# config.py
 import math
 import os
-from typing import TypeVar
+from typing import Callable, TypeVar
 
 from dotenv import dotenv_values
 
@@ -16,16 +15,18 @@ DEFAULT_COLOR_LEVELS = 2  # 1-bit (2 levels)
 T = TypeVar("T")
 
 
-def get_config_value(key, default, type_cast):
+def get_config_value(key: str, default: T, type_cast: Callable[[str], T]) -> T:
     """Get a configuration value, prioritizing environment variables."""
-    value = os.getenv(key) or config.get(key)
-    if value is None:
+    # os.getenv returns Optional[str], config.get(key) returns Optional[str]
+    raw_value = os.getenv(key) or config.get(key)
+    if raw_value is None:
         return default
     try:
-        return type_cast(value)
-    except ValueError:
+        return type_cast(str(raw_value))
+    except (ValueError, TypeError):
+        cast_name = getattr(type_cast, "__name__", str(type_cast))
         print(
-            f"Warning: Could not cast '{value}' for {key} to {type_cast.__name__}. Using default: {default}"
+            f"Warning: Could not cast '{raw_value}' for {key} to {cast_name}. Using default: {default}"
         )
         return default
 

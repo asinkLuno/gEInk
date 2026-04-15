@@ -1,4 +1,4 @@
-geink preprocess ./test_img 
+geink preprocess ./test_img
 # geink dither ./test_img -m floyd_steinberg
 # geink dither ./test_img -m jarvis_judice_ninke
 # geink dither ./test_img -m stucki
