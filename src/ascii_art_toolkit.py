@@ -233,12 +233,14 @@ def render_ascii_art(
     gy = cv2.Sobel(resized, cv2.CV_64F, 0, 1, ksize=3)
 
     canvas = Image.new(
-        "RGB", (int(grid_cols * cell_w), int(grid_rows * cell_h)), (255, 255, 255)
+        "RGB", (int(grid_cols * cell_w), int(grid_rows * cell_h)), (0, 0, 0)
     )
     draw = ImageDraw.Draw(canvas)
+    ascii_rows = []
 
     for row in range(grid_rows):
         y0, y1 = row * cell_h, (row + 1) * cell_h
+        current_row_chars = []
         for col in range(grid_cols):
             x0, x1 = col * cell_w, (col + 1) * cell_w
 
@@ -247,8 +249,16 @@ def render_ascii_art(
             else:
                 char = " "
 
+            current_row_chars.append(char)
             if char != " ":
-                draw.text((x0, y0), char, fill=(0, 0, 0), font=font)
+                draw.text((x0, y0), char, fill=(0, 255, 0), font=font)
+
+        ascii_rows.append("".join(current_row_chars))
+
+    if out_dir is not None and stem is not None:
+        txt_path = out_dir / f"{stem}_ascii.txt"
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(ascii_rows))
 
     return cv2.cvtColor(np.array(canvas), cv2.COLOR_RGB2BGR)
 

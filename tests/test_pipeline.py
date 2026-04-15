@@ -100,8 +100,11 @@ def test_ascii_art_09(tmp_path: Any):
     assert result.returncode == 0, f"ascii-art failed:\n{result.stderr}"
 
     out_file = tmp_path / "09" / "09_ascii.png"
-    assert out_file.exists(), "ASCII art output not found"
-    assert out_file.stat().st_size > 0, "ASCII art output is empty"
+    txt_file = tmp_path / "09" / "09_ascii.txt"
+    assert out_file.exists(), "ASCII art image output not found"
+    assert out_file.stat().st_size > 0, "ASCII art image is empty"
+    assert txt_file.exists(), "ASCII art txt output not found"
+    assert txt_file.stat().st_size > 0, "ASCII art txt is empty"
 
 
 @pytest.mark.test_img
