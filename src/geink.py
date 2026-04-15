@@ -123,7 +123,7 @@ def gridcut(input_path, rows, cols):
 @cli.command()
 @click.argument("input_path", type=click.Path(exists=True))
 @click.argument("output_path", type=click.Path(), required=False)
-@click.option("--dot-radius", "-r", type=int, default=3, help="Base layer dot radius in pixels")
+@click.option("--dot-radius", "-r", type=int, default=5, help="Base layer dot radius in pixels")
 @click.option("--spacing", "-s", type=int, default=8, help="Base layer dot spacing in pixels")
 @click.option("--highlight-thresh", type=int, default=220, help="Brightness >= this gets a highlight overlay (0-255)")
 @click.option("--shadow-thresh", type=int, default=35, help="Brightness <= this gets a shadow overlay (0-255)")

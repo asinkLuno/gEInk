@@ -50,7 +50,7 @@ def _draw_dot(canvas: np.ndarray, cx: int, cy: int, radius: int, color: np.ndarr
     dist2 = (DX ** 2 + DY ** 2).astype(np.float32)
 
     # 高斯衰减：中心全色，边缘渐淡，圆外截断
-    sigma2 = (radius * 0.5) ** 2
+    sigma2 = (radius * 0.7) ** 2
     alpha = np.exp(-dist2 / (2 * sigma2))
     alpha[dist2 > radius ** 2] = 0.0
 
@@ -86,10 +86,10 @@ def _render_dots(
 def apply_pointillism(
     img: np.ndarray,
     palette: np.ndarray = DEFAULT_PALETTE,
-    dot_radius: int = 3,
+    dot_radius: int = 5,
     spacing: int = 8,
 ) -> np.ndarray:
-    """基础点彩：Atkinson 抖动 + 不重叠实心圆点。"""
+    """基础点彩：Atkinson 抖动 + 微重叠圆点。"""
     h, w, _ = img.shape
     h_grid = max(1, h // spacing)
     w_grid = max(1, w // spacing)
@@ -105,7 +105,7 @@ def apply_pointillism(
 def apply_pointillism_layered(
     img: np.ndarray,
     palette: np.ndarray = DEFAULT_PALETTE,
-    dot_radius: int = 3,
+    dot_radius: int = 5,
     spacing: int = 8,
     mean_shift_sp: int = 20,
     mean_shift_sr: int = 40,
@@ -146,20 +146,17 @@ def apply_pointillism_layered(
     highlight_mask = gray >= highlight_thresh
     shadow_mask = gray <= shadow_thresh
 
-    # 叠加层在更细的网格上抖动（dot 更小更密）
     h_ov = max(1, h // overlay_spacing)
     w_ov = max(1, w // overlay_spacing)
-    ov_small = cv2.resize(img, (w_ov, h_ov), interpolation=cv2.INTER_AREA)
-
-    logger.info(f"叠加层：{w_ov}x{h_ov} 网格 Atkinson 抖动...")
-    dithered_ov = color_dither_atkinson(ov_small, palette)
+    white = np.full((h_ov, w_ov, 3), 255, dtype=np.uint8)
+    black = np.zeros((h_ov, w_ov, 3), dtype=np.uint8)
 
     if highlight_mask.any():
         logger.info(f"绘制高光叠加层（覆盖 {highlight_mask.mean():.1%} 面积）...")
-        _render_dots(canvas, dithered_ov, h_ov, w_ov, overlay_spacing, overlay_dot_radius, highlight_mask)
+        _render_dots(canvas, white, h_ov, w_ov, overlay_spacing, overlay_dot_radius, highlight_mask)
 
     if shadow_mask.any():
         logger.info(f"绘制阴影叠加层（覆盖 {shadow_mask.mean():.1%} 面积）...")
-        _render_dots(canvas, dithered_ov, h_ov, w_ov, overlay_spacing, overlay_dot_radius, shadow_mask)
+        _render_dots(canvas, black, h_ov, w_ov, overlay_spacing, overlay_dot_radius, shadow_mask)
 
     return canvas
