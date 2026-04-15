@@ -170,7 +170,7 @@ function buildHtml(
 
   /* BBS header */
   .bbs-header {
-    margin-bottom: ${PADDING / 2}px;
+    margin-bottom: ${PADDING}px;
     line-height: 1.6;
     white-space: nowrap;
   }
@@ -178,7 +178,7 @@ function buildHtml(
   /* ASCII art + panel side-by-side */
   .content-row {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: ${PADDING}px;
   }
   pre {
