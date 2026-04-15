@@ -211,19 +211,19 @@ def pointillize(
         # 创建同名目录保存中间步骤和成品
         out_dir = img_file.parent / img_file.stem
         out_dir.mkdir(parents=True, exist_ok=True)
-        
+
         logger.info(
             f"Pointillizing {img_file.name} {img.shape[1]}x{img.shape[0]} → ×{scale}..."
         )
-        
+
         # 步骤 1：色块化
         blocked = create_color_blocks(img, spatial_rad=spatial_rad, color_rad=color_rad)
         cv2.imwrite(str(out_dir / f"{img_file.stem}_blocked.png"), blocked)
-        
+
         # 步骤 2：抖动
         dithered = color_atkinson_dithering(blocked, DEFAULT_PALETTE)
         cv2.imwrite(str(out_dir / f"{img_file.stem}_dithered.png"), dithered)
-        
+
         # 步骤 3：点彩渲染
         art = render_color_pointillism(
             dithered,
@@ -237,7 +237,7 @@ def pointillize(
         # 最终输出也保存在同名目录中
         final_out = out_dir / f"{img_file.stem}_pointillism.png"
         _ = cv2.imwrite(str(final_out), art)
-        
+
         logger.success(f"Intermediate steps saved to: {out_dir}/")
         logger.success(f"Final art saved to: {final_out}")
         return True
@@ -271,7 +271,7 @@ def pointillize(
     "--input-height",
     "-i",
     type=int,
-    default=400,
+    default=None,
     help="Downscale input to this height before processing",
 )
 @click.option(
@@ -280,11 +280,19 @@ def pointillize(
     default=False,
     help="GrabCut foreground extraction before edge detection",
 )
+@click.option(
+    "--edge-threshold",
+    "-t",
+    type=int,
+    default=20,
+    help="Trigger threshold for edge detection (lower = more lines)",
+)
 def ascii_art(
     input_path: str,
     cell_height: int,
-    input_height: int,
+    input_height: int | None,
     grabcut: bool,
+    edge_threshold: int,
 ) -> None:
     """
     Convert image to ASCII art using Sarasa Gothic font.
@@ -294,7 +302,6 @@ def ascii_art(
 
     Examples:
         geink ascii-art photo.jpg
-        geink ascii-art photo.jpg --grabcut
     """
     input_file = Path(input_path)
     img = cv2.imread(str(input_file))
@@ -306,10 +313,16 @@ def ascii_art(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(
-        f"Rendering ASCII art for {input_file.name} (cell_height={cell_height}, grabcut={grabcut})..."
+        f"Rendering ASCII art for {input_file.name} (cell_height={cell_height})..."
     )
     result = render_ascii_art(
-        img, cell_height=cell_height, input_height=input_height, grabcut=grabcut, out_dir=out_dir, stem=input_file.stem
+        img,
+        cell_height=cell_height,
+        input_height=input_height,
+        grabcut=grabcut,
+        edge_threshold=edge_threshold,
+        out_dir=out_dir,
+        stem=input_file.stem,
     )
 
     final_out = out_dir / f"{input_file.stem}_ascii.png"

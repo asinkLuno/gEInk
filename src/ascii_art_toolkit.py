@@ -21,16 +21,48 @@ def _get_hed() -> "HEDdetector":
 
 
 def _hed_edges(gray: np.ndarray) -> np.ndarray:
-    """Return a soft edge map via HED — clean, noise-free, same spatial size as input."""
+    """Return a thinned and connected edge map via HED.
+
+    Applies morphological closing to bridge gaps and skeletonization to extract
+    the 1-pixel wide 'spine' of the edges, resulting in cleaner ASCII art.
+    """
+    from skimage.morphology import skeletonize
+
     h, w = gray.shape
     rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
     pil_in = Image.fromarray(rgb)
     long_side = max(h, w)
-    pil_out = _get_hed()(pil_in, detect_resolution=long_side, image_resolution=long_side)
-    edge = np.array(pil_out.convert("L"))
+
+    # HED produces a soft probability map
+    pil_out = _get_hed()(
+        pil_in, detect_resolution=long_side, image_resolution=long_side
+    )
+    if isinstance(pil_out, Image.Image):
+        edge = np.array(pil_out.convert("L"))
+    else:
+        # If it's a numpy array (Mat), convert to grayscale if needed
+        edge = np.array(pil_out)
+        if len(edge.shape) == 3:
+            edge = cv2.cvtColor(edge, cv2.COLOR_RGB2GRAY)
+
     if edge.shape != (h, w):
         edge = cv2.resize(edge, (w, h), interpolation=cv2.INTER_LINEAR)
-    return edge
+
+    # Connect and thin
+    # 1. Binary mask to work with morphological operations and skeletonization
+    # We use a low threshold to preserve weak edges
+    mask = (edge > 20).astype(np.uint8) * 255
+
+    # 2. Morphological closing to bridge small gaps (e.g. 1-2 pixels)
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+    # 3. Skeletonize to get 1-pixel wide connected lines
+    skel = skeletonize(mask > 0)
+
+    # Return thinned edges. We use 255 to ensure they are picked up by the mean threshold check.
+    return skel.astype(np.uint8) * 255
+
 
 SARASA_FONT_PATH = str(Path(__file__).parent.parent / "SarasaMonoSC-Regular.ttf")
 
@@ -148,17 +180,18 @@ def _grabcut_fg_mask(
 def render_ascii_art(
     img_bgr: np.ndarray,
     cell_height: int = 12,
-    input_height: int = 400,
+    input_height: Optional[int] = None,
     grabcut: bool = False,
+    edge_threshold: int = 20,
     out_dir: Optional[Path] = None,
     stem: Optional[str] = None,
 ) -> np.ndarray:
     """Convert image to ASCII art rendered with Sarasa Gothic font.
 
     Pipeline:
-    1. Downscale to input_height (preserve aspect ratio)
+    1. Downscale to input_height (preserve aspect ratio) if provided
     2. GrabCut foreground extraction (optional) — background set to white
-    3. HED edge detection (clean, noise-free) + Sobel gradients for direction
+    3. HED edge detection (connect gaps + skeletonize thinning) + Sobel gradients
     4. Per cell: classify edge char, space for non-edge
     5. Render onto white canvas with Sarasa Gothic
     """
@@ -170,7 +203,7 @@ def render_ascii_art(
     cell_h = int(bbox[3] - bbox[1])
 
     h, w = img_bgr.shape[:2]
-    if h > input_height:
+    if input_height is not None and h > input_height:
         scale = input_height / h
         img_bgr = cv2.resize(
             img_bgr, (int(w * scale), input_height), interpolation=cv2.INTER_AREA
@@ -209,7 +242,7 @@ def render_ascii_art(
         for col in range(grid_cols):
             x0, x1 = col * cell_w, (col + 1) * cell_w
 
-            if edges[y0:y1, x0:x1].mean() > 20:
+            if edges[y0:y1, x0:x1].mean() > edge_threshold:
                 char = _classify_edge_cell(gx[y0:y1, x0:x1], gy[y0:y1, x0:x1], cell_h)
             else:
                 char = " "
