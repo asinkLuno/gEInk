@@ -103,17 +103,35 @@ def _classify_edge_cell(cell_gx: np.ndarray, cell_gy: np.ndarray, cell_h: int) -
     return _angle_to_edge_char(mean_angle)
 
 
+def _grabcut_fg_mask(
+    img_bgr: np.ndarray, margin: float = 0.05, iters: int = 5
+) -> np.ndarray:
+    """Return boolean foreground mask via GrabCut with auto-rect initialization."""
+    h, w = img_bgr.shape[:2]
+    my, mx = max(1, int(h * margin)), max(1, int(w * margin))
+    rect = (mx, my, w - 2 * mx, h - 2 * my)
+    mask = np.zeros((h, w), dtype=np.uint8)
+    bgd = np.zeros((1, 65), dtype=np.float64)
+    fgd = np.zeros((1, 65), dtype=np.float64)
+    cv2.grabCut(img_bgr, mask, rect, bgd, fgd, iters, cv2.GC_INIT_WITH_RECT)
+    return (mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD)
+
+
 def render_ascii_art(
-    img_bgr: np.ndarray, cell_height: int = 12, input_height: int = 400
+    img_bgr: np.ndarray,
+    cell_height: int = 12,
+    input_height: int = 400,
+    grabcut: bool = False,
 ) -> np.ndarray:
     """Convert image to ASCII art rendered with Sarasa Gothic font.
 
     Pipeline:
     1. Downscale to input_height (preserve aspect ratio)
-    2. CLAHE + unsharp mask for contrast/edge enhancement
-    3. Canny edge detection + Sobel gradients
-    4. Per cell: classify edge char, space for non-edge
-    5. Render onto white canvas with Sarasa Gothic
+    2. GrabCut foreground extraction (optional) — background set to white
+    3. Bilateral Filter for noise reduction while preserving edges
+    4. Canny edge detection (Dynamic thresholds) + Sobel gradients
+    5. Per cell: classify edge char, space for non-edge
+    6. Render onto white canvas with Sarasa Gothic
     """
     font = ImageFont.truetype(SARASA_FONT_PATH, cell_height)
 
@@ -131,17 +149,25 @@ def render_ascii_art(
 
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    gray = clahe.apply(gray)
-    blurred = cv2.GaussianBlur(gray, (0, 0), sigmaX=2)
-    gray = cv2.addWeighted(gray, 1.8, blurred, -0.8, 0)
+    if grabcut:
+        fg_mask = _grabcut_fg_mask(img_bgr)
+        gray[~fg_mask] = 255
+
+    # === 优化点 1：使用双边滤波替换原本激进的锐化，保边去噪 ===
+    gray = cv2.bilateralFilter(gray, d=7, sigmaColor=75, sigmaSpace=75)
 
     h, w = gray.shape
     grid_rows = max(1, h // cell_h)
     grid_cols = max(1, w // cell_w)
 
     resized = cv2.resize(gray, (int(grid_cols * cell_w), int(grid_rows * cell_h)))
-    edges = cv2.Canny(resized, 40, 120)
+
+    # === 优化点 2：动态计算 Canny 阈值，提高边缘提取的标准 ===
+    median_val = np.median(resized)
+    lower_thresh = int(max(0, (1.0 - 0.33) * median_val))
+    upper_thresh = int(min(255, (1.0 + 0.33) * median_val))
+    edges = cv2.Canny(resized, lower_thresh, upper_thresh)
+
     gx = cv2.Sobel(resized, cv2.CV_64F, 1, 0, ksize=3)
     gy = cv2.Sobel(resized, cv2.CV_64F, 0, 1, ksize=3)
 
@@ -155,7 +181,9 @@ def render_ascii_art(
         for col in range(grid_cols):
             x0, x1 = col * cell_w, (col + 1) * cell_w
 
-            if edges[y0:y1, x0:x1].mean() > 8:
+            # === 优化点 3：提高触发阈值，增加画面留白 ===
+            # 此处可以根据你的实际图片效果微调，数字越大线条越少、留白越多 (建议区间 15 ~ 30)
+            if edges[y0:y1, x0:x1].mean() > 20:
                 char = _classify_edge_cell(gx[y0:y1, x0:x1], gy[y0:y1, x0:x1], cell_h)
             else:
                 char = " "

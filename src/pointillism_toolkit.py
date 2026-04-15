@@ -97,25 +97,28 @@ def render_color_pointillism(
     base_radius: int = 3,
     jitter: int = 1,
     bg_color: tuple[int, int, int] = (240, 245, 245),  # 偏暖灰的纸张底色 (BGR格式)
+    alpha: float = 0.5,  # 水彩透明度，0=完全透明，1=不透明
 ) -> np.ndarray:
     """
-    第三阶段：物理笔触渲染
-    将生成的数字像素矩阵渲染为带有颜料重叠、大小差异和手绘随机性的画作。
+    第三阶段：水彩渲染
+    将生成的数字像素矩阵渲染为柔边、透明、颜色相互渗透的水彩效果。
     """
     height, width = dithered_img.shape[:2]
 
-    # 创建高分辨率的彩色空白画布
-    canvas = np.full((height * scale, width * scale, 3), bg_color, dtype=np.uint8)
+    # float32 画布支持真正的 alpha 混合
+    canvas = np.full((height * scale, width * scale, 3), bg_color, dtype=np.float32)
 
     logger.info(
-        f"开始渲染彩色点彩效果... (放大倍数: {scale}x, 基础半径: {base_radius})"
+        f"开始渲染水彩点彩效果... (放大倍数: {scale}x, 基础半径: {base_radius}, 透明度: {alpha})"
     )
+
+    canvas_h, canvas_w = canvas.shape[:2]
 
     for y in range(height):
         for x in range(width):
             pixel_color = dithered_img[y, x]
 
-            # 跳过纯白色，利用“留白”透出画布底层纸张的颜色
+            # 跳过纯白色，利用"留白"透出画布底层纸张的颜色
             if np.array_equal(pixel_color, [255, 255, 255]):
                 continue
 
@@ -133,16 +136,25 @@ def render_color_pointillism(
             final_x = center_x + offset_x
             final_y = center_y + offset_y
 
-            dot_color = (int(pixel_color[0]), int(pixel_color[1]), int(pixel_color[2]))
-            shift = max(1, r // 2)
-            # 落笔处（左侧）：墨水浓，主体圆
-            _ = cv2.circle(canvas, (final_x - shift, final_y), r, dot_color, -1)
-            # 收笔处（右侧）：墨水稀，与底色渗透的小尾圆
-            tail_color = tuple(
-                int(dot_color[i] * 0.35 + bg_color[i] * 0.65) for i in range(3)
-            )
-            _ = cv2.circle(
-                canvas, (final_x + shift, final_y), max(1, r - 1), tail_color, -1
-            )
+            # 局部 patch 边界（含边缘模糊扩展）
+            pad = r + 2
+            y1, y2 = max(0, final_y - pad), min(canvas_h, final_y + pad + 1)
+            x1, x2 = max(0, final_x - pad), min(canvas_w, final_x + pad + 1)
+            if y1 >= y2 or x1 >= x2:
+                continue
 
-    return canvas
+            patch_h, patch_w = y2 - y1, x2 - x1
+            local_cx, local_cy = final_x - x1, final_y - y1
+
+            # 圆形遮罩 → Gaussian 软化边缘 → 乘以 alpha
+            hard_mask = np.zeros((patch_h, patch_w), dtype=np.float32)
+            cv2.circle(hard_mask, (local_cx, local_cy), r, 1.0, -1)
+            ksize = r * 2 + 1
+            soft_mask = cv2.GaussianBlur(hard_mask, (ksize, ksize), r / 2) * alpha
+
+            # 将颜色 alpha 混合到画布（颜色渗透，不是覆盖）
+            dot_color = pixel_color.astype(np.float32)
+            m = soft_mask[:, :, np.newaxis]
+            canvas[y1:y2, x1:x2] = canvas[y1:y2, x1:x2] * (1 - m) + dot_color * m
+
+    return np.clip(canvas, 0, 255).astype(np.uint8)

@@ -161,6 +161,13 @@ def gridcut(input_path: str, rows: int, cols: int) -> None:
 @click.option(
     "--max-dim", type=int, default=600, help="Resize input so longest side ≤ this value"
 )
+@click.option(
+    "--alpha",
+    "-a",
+    type=float,
+    default=0.5,
+    help="Watercolor dot opacity (0=transparent, 1=opaque)",
+)
 def pointillize(
     input_path: str,
     output_path: str | None,
@@ -170,6 +177,7 @@ def pointillize(
     dot_radius: int,
     jitter: int,
     max_dim: int,
+    alpha: float,
 ) -> None:
     """
     Convert image(s) to color pointillism art.
@@ -203,7 +211,7 @@ def pointillize(
         blocked = create_color_blocks(img, spatial_rad=spatial_rad, color_rad=color_rad)
         dithered = color_atkinson_dithering(blocked, DEFAULT_PALETTE)
         art = render_color_pointillism(
-            dithered, scale=scale, base_radius=dot_radius, jitter=jitter
+            dithered, scale=scale, base_radius=dot_radius, jitter=jitter, alpha=alpha
         )
 
         _ = cv2.imwrite(str(out_file), art)
@@ -243,18 +251,28 @@ def pointillize(
     default=400,
     help="Downscale input to this height before processing",
 )
+@click.option(
+    "--grabcut",
+    is_flag=True,
+    default=False,
+    help="GrabCut foreground extraction before edge detection",
+)
 def ascii_art(
-    input_path: str, output_path: str | None, cell_height: int, input_height: int
+    input_path: str,
+    output_path: str | None,
+    cell_height: int,
+    input_height: int,
+    grabcut: bool,
 ) -> None:
     """
     Convert image to ASCII art using Sarasa Gothic font.
 
     Edges are drawn with - | / \\ _ characters based on gradient direction.
-    Non-edge areas are filled with density characters by grayscale brightness.
+    Use --grabcut to strip background before edge detection.
 
     Examples:
         geink ascii-art photo.jpg
-        geink ascii-art photo.jpg out.png --cell-height 10
+        geink ascii-art photo.jpg out.png --grabcut
     """
     img = cv2.imread(input_path)
     if img is None:
@@ -262,9 +280,11 @@ def ascii_art(
         return
 
     logger.info(
-        f"Rendering ASCII art for {Path(input_path).name} (cell_height={cell_height})..."
+        f"Rendering ASCII art for {Path(input_path).name} (cell_height={cell_height}, grabcut={grabcut})..."
     )
-    result = render_ascii_art(img, cell_height=cell_height, input_height=input_height)
+    result = render_ascii_art(
+        img, cell_height=cell_height, input_height=input_height, grabcut=grabcut
+    )
 
     out = (
         Path(output_path)
