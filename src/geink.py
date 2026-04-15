@@ -208,11 +208,23 @@ def pointillize(
                 interpolation=cv2.INTER_AREA,
             )
 
+        # 创建同名目录保存中间步骤和成品
+        out_dir = img_file.parent / img_file.stem
+        out_dir.mkdir(parents=True, exist_ok=True)
+        
         logger.info(
             f"Pointillizing {img_file.name} {img.shape[1]}x{img.shape[0]} → ×{scale}..."
         )
+        
+        # 步骤 1：色块化
         blocked = create_color_blocks(img, spatial_rad=spatial_rad, color_rad=color_rad)
+        cv2.imwrite(str(out_dir / f"{img_file.stem}_blocked.png"), blocked)
+        
+        # 步骤 2：抖动
         dithered = color_atkinson_dithering(blocked, DEFAULT_PALETTE)
+        cv2.imwrite(str(out_dir / f"{img_file.stem}_dithered.png"), dithered)
+        
+        # 步骤 3：点彩渲染
         art = render_color_pointillism(
             dithered,
             scale=scale,
@@ -222,8 +234,12 @@ def pointillize(
             brush_textures=brush_textures,
         )
 
-        _ = cv2.imwrite(str(out_file), art)
-        logger.success(f"Art saved to: {out_file}")
+        # 最终输出也保存在同名目录中
+        final_out = out_dir / f"{img_file.stem}_pointillism.png"
+        _ = cv2.imwrite(str(final_out), art)
+        
+        logger.success(f"Intermediate steps saved to: {out_dir}/")
+        logger.success(f"Final art saved to: {final_out}")
         return True
 
     if input_obj.is_file():
