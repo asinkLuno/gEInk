@@ -21,7 +21,7 @@ dependencies = [
     "loguru",
     "click",
     "numpy",
-"dotenv (>=0.9.9,<0.10.0)",
+    "dotenv (>=0.9.9,<0.10.0)",
 ]
 
 [project.scripts]
@@ -29,6 +29,10 @@ geink = "src.geink:cli"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple"
+default = true
 
 [dependency-groups]
 dev = [

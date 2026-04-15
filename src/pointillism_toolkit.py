@@ -1,19 +1,11 @@
-import cv2
 import numpy as np
+import cv2
+import random
+import sys
+import os
 from loguru import logger
 
-# 默认 7 色调色盘: 黑, 白, 红, 绿, 蓝, 黄, 橙 (BGR 顺序)
-# 选色参考 ACeP 七色标准并进行审美优化
-DEFAULT_PALETTE = np.array([
-    [0, 0, 0],          # Black
-    [255, 255, 255],    # White
-    [0, 0, 200],        # Red (沉稳红)
-    [0, 160, 0],        # Green (森林绿)
-    [160, 0, 0],        # Blue (深海蓝)
-    [0, 220, 255],      # Yellow (明黄)
-    [0, 110, 255]       # Orange (活力橙)
-], dtype=np.float32)
-
+# Atkinson 误差扩散矩阵 (dy, dx, weight)
 ATKINSON_KERNEL = [
     (0, 1, 1 / 8),
     (0, 2, 1 / 8),
@@ -23,140 +15,159 @@ ATKINSON_KERNEL = [
     (2, 0, 1 / 8),
 ]
 
+# 用户定义的调色板 (注意: OpenCV 默认读取和显示均为 BGR 格式)
+# 这里的颜色必须以 BGR 顺序排列
+DEFAULT_PALETTE = np.array([
+    [0, 0, 0],          # Black
+    [255, 255, 255],    # White
+    [0, 0, 200],        # Red (沉稳红 B=0, G=0, R=200)
+    [0, 160, 0],        # Green (森林绿)
+    [160, 0, 0],        # Blue (深海蓝)
+    [0, 220, 255],      # Yellow (明黄)
+    [0, 110, 255]       # Orange (活力橙)
+], dtype=np.float32)
 
-def color_dither_atkinson(img: np.ndarray, palette: np.ndarray) -> np.ndarray:
-    h, w, _ = img.shape
-    dithered = img.astype(np.float32).copy()
-    for y in range(h):
-        for x in range(w):
-            old = dithered[y, x].copy()
-            new = palette[np.argmin(np.linalg.norm(palette - old, axis=1))]
-            dithered[y, x] = new
-            error = old - new
-            for dy, dx, weight in ATKINSON_KERNEL:
+
+def create_color_blocks(img: np.ndarray, spatial_rad: int = 15, color_rad: int = 40) -> np.ndarray:
+    """
+    第一阶段：底稿概括
+    使用均值漂移滤波抹平细碎纹理，保留结构边缘，划分出明确的大色块。
+    """
+    logger.info(f"正在进行平滑减色处理 (空间半径:{spatial_rad}, 色彩半径:{color_rad})...这可能需要几秒钟")
+    shifted = cv2.pyrMeanShiftFiltering(img, sp=spatial_rad, sr=color_rad)
+    return shifted
+
+
+def find_closest_palette_color(pixel: np.ndarray, palette: np.ndarray) -> np.ndarray:
+    """计算当前像素与调色板中所有颜色的欧氏距离，返回最接近的纯色"""
+    distances = np.sum((palette - pixel) ** 2, axis=1)
+    closest_index = np.argmin(distances)
+    return palette[closest_index]
+
+
+def color_atkinson_dithering(color_img: np.ndarray, palette: np.ndarray) -> np.ndarray:
+    """
+    第二阶段：数字排线与光学混合
+    对彩色图像进行三通道 Atkinson 抖动，利用调色板中的纯色交替排布来混合出原本不存在的颜色。
+    """
+    dithered = color_img.astype(np.float32)
+    height, width, channels = dithered.shape
+
+    logger.info("应用彩色 Atkinson 抖动 (计算光学混合)...")
+
+    for y in range(height):
+        for x in range(width):
+            old_pixel = dithered[y, x].copy()
+            
+            # 寻找调色板中最接近的颜色
+            new_pixel = find_closest_palette_color(old_pixel, palette)
+            dithered[y, x] = new_pixel
+            
+            # 计算三通道误差向量 (B, G, R 的偏差)
+            error = old_pixel - new_pixel
+            
+            if np.all(error == 0):
+                continue
+                
+            # 将色彩误差扩散给尚未处理的周围像素
+            for dy, dx, w in ATKINSON_KERNEL:
                 ny, nx = y + dy, x + dx
-                if 0 <= ny < h and 0 <= nx < w:
-                    dithered[ny, nx] += error * weight
+                if 0 <= ny < height and 0 <= nx < width:
+                    dithered[ny, nx] += error * w
+
     return np.clip(dithered, 0, 255).astype(np.uint8)
 
 
-def _draw_dot(canvas: np.ndarray, cx: int, cy: int, radius: int, color: np.ndarray):
-    h, w = canvas.shape[:2]
-    y0, y1 = max(0, cy - radius), min(h, cy + radius + 1)
-    x0, x1 = max(0, cx - radius), min(w, cx + radius + 1)
-    ys = np.arange(y0, y1) - cy
-    xs = np.arange(x0, x1) - cx
-    DX, DY = np.meshgrid(xs, ys)
-    dist2 = (DX ** 2 + DY ** 2).astype(np.float32)
-
-    # 高斯衰减：中心全色，边缘渐淡，圆外截断
-    sigma2 = (radius * 0.7) ** 2
-    alpha = np.exp(-dist2 / (2 * sigma2))
-    alpha[dist2 > radius ** 2] = 0.0
-
-    region = canvas[y0:y1, x0:x1].astype(np.float32)
-    alpha3 = alpha[:, :, np.newaxis]
-    canvas[y0:y1, x0:x1] = np.clip(
-        region * (1 - alpha3) + np.array(color, dtype=np.float32) * alpha3, 0, 255
-    ).astype(np.uint8)
-
-
-def _render_dots(
-    canvas: np.ndarray,
-    dithered_small: np.ndarray,
-    h_grid: int,
-    w_grid: int,
-    spacing: int,
-    dot_radius: int,
-    mask: np.ndarray | None = None,
-):
-    """将 dithered_small 渲染为规则点阵到 canvas。
-    mask 为全图分辨率的布尔遮罩，仅在点中心落入 mask=True 区域时绘制。
-    """
-    for gy in range(h_grid):
-        for gx in range(w_grid):
-            cy = int((gy + 0.5) * spacing)
-            cx = int((gx + 0.5) * spacing)
-            if mask is not None:
-                if not mask[min(cy, mask.shape[0] - 1), min(cx, mask.shape[1] - 1)]:
-                    continue
-            _draw_dot(canvas, cx, cy, dot_radius, dithered_small[gy, gx])
-
-
-def apply_pointillism(
-    img: np.ndarray,
-    palette: np.ndarray = DEFAULT_PALETTE,
-    dot_radius: int = 5,
-    spacing: int = 8,
+def render_color_pointillism(
+    dithered_img: np.ndarray, 
+    scale: int = 4, 
+    base_radius: int = 3, 
+    jitter: int = 1,
+    bg_color: tuple = (240, 245, 245)  # 偏暖灰的纸张底色 (BGR格式)
 ) -> np.ndarray:
-    """基础点彩：Atkinson 抖动 + 微重叠圆点。"""
-    h, w, _ = img.shape
-    h_grid = max(1, h // spacing)
-    w_grid = max(1, w // spacing)
-    img_small = cv2.resize(img, (w_grid, h_grid), interpolation=cv2.INTER_AREA)
-    logger.info(f"在 {w_grid}x{h_grid} 点阵上做 Atkinson 减色抖动...")
-    dithered_small = color_dither_atkinson(img_small, palette)
-    canvas = np.full((h, w, 3), 255, dtype=np.uint8)
-    _render_dots(canvas, dithered_small, h_grid, w_grid, spacing, dot_radius)
-    logger.info(f"完成：共渲染 {h_grid * w_grid} 个点")
+    """
+    第三阶段：物理笔触渲染
+    将生成的数字像素矩阵渲染为带有颜料重叠、大小差异和手绘随机性的画作。
+    """
+    height, width, _ = dithered_img.shape
+    
+    # 创建高分辨率的彩色空白画布
+    canvas = np.full((height * scale, width * scale, 3), bg_color, dtype=np.uint8)
+    
+    logger.info(f"开始渲染彩色点彩效果... (放大倍数: {scale}x, 基础半径: {base_radius})")
+    
+    for y in range(height):
+        for x in range(width):
+            color = dithered_img[y, x].tolist()
+            
+            # 跳过纯白色，利用“留白”透出画布底层纸张的颜色
+            if color == [255.0, 255.0, 255.0]:
+                continue
+                
+            # 计算在高分辨率画布上的基础中心坐标
+            center_x = x * scale + scale // 2
+            center_y = y * scale + scale // 2
+            
+            # 引入位置随机偏移 (打破机械排布)
+            offset_x = random.randint(-jitter, jitter)
+            offset_y = random.randint(-jitter, jitter)
+            
+            # 引入笔触大小微小变化
+            r = base_radius + random.randint(0, 1)
+            
+            final_x = center_x + offset_x
+            final_y = center_y + offset_y
+            
+            dot_color = (int(color[0]), int(color[1]), int(color[2]))
+            # 绘制实心圆点
+            cv2.circle(canvas, (final_x, final_y), r, dot_color, -1)
+
     return canvas
 
 
-def apply_pointillism_layered(
-    img: np.ndarray,
-    palette: np.ndarray = DEFAULT_PALETTE,
-    dot_radius: int = 5,
-    spacing: int = 8,
-    mean_shift_sp: int = 20,
-    mean_shift_sr: int = 40,
-    highlight_thresh: int = 220,
-    shadow_thresh: int = 35,
-    overlay_dot_radius: int = 2,
-    overlay_spacing: int = 5,
-) -> np.ndarray:
-    """
-    分层点彩画：
+def main():
+    input_path = "/home/guozr/CODE/gEInk/tests/a.avif"
+    
+    # 输出的文件可以让你清楚地看到三个不同阶段的演变过程
+    out_blocks = "/home/guozr/CODE/gEInk/tests/a_1_blocks.png"
+    out_dither = "/home/guozr/CODE/gEInk/tests/a_2_dither.png"
+    out_final = "/home/guozr/CODE/gEInk/tests/a_3_pointillism.png"
 
-    Layer 1 - 大色块底层：Mean Shift 平滑消除细纹理 → Atkinson 抖动 → 全图不重叠点。
-    Layer 2 - 高光叠加：原图亮度 >= highlight_thresh 的区域，叠加更细密的点。
-    Layer 3 - 阴影叠加：原图亮度 <= shadow_thresh 的区域，叠加更细密的点。
+    if not os.path.exists(input_path):
+        logger.error(f"找不到输入图片: {input_path}。请准备一张测试图片并重命名为 input.jpg")
+        sys.exit(1)
 
-    高光/阴影层基于原图（不用平滑图），保真极值区域的颜色。
-    叠加层可与底层重叠，增强光感对比。
-    """
-    h, w, _ = img.shape
+    logger.info(f"读取图片: {input_path}")
+    img = cv2.imread(input_path)
+    
+    # 限制最大尺寸，防止处理时间过长
+    max_dim = 600
+    if max(img.shape[:2]) > max_dim:
+        scale_factor = max_dim / max(img.shape[:2])
+        new_size = (int(img.shape[1] * scale_factor), int(img.shape[0] * scale_factor))
+        img = cv2.resize(img, new_size, interpolation=cv2.INTER_AREA)
+        logger.info(f"图片已缩放至: {img.shape[:2]}")
 
-    # --- Layer 1: 大色块底层 ---
-    logger.info("Mean Shift 平滑，分割大色块...")
-    smoothed = cv2.pyrMeanShiftFiltering(img, mean_shift_sp, mean_shift_sr)
+    # 第一步：底图概括（获取类似水粉/油画的块面感）
+    blocked_img = create_color_blocks(img, spatial_rad=15, color_rad=40)
+    cv2.imwrite(out_blocks, blocked_img)
+    logger.info(f"色块底图已保存至: {out_blocks}")
 
-    h_base = max(1, h // spacing)
-    w_base = max(1, w // spacing)
-    base_small = cv2.resize(smoothed, (w_base, h_base), interpolation=cv2.INTER_AREA)
+    # 第二步：彩色抖动（通过调色板交替进行光学混色）
+    dithered_img = color_atkinson_dithering(blocked_img, DEFAULT_PALETTE)
+    cv2.imwrite(out_dither, dithered_img)
+    logger.info(f"光学混合排阵已保存至: {out_dither}")
 
-    logger.info(f"大色块层：{w_base}x{h_base} 网格 Atkinson 抖动...")
-    dithered_base = color_dither_atkinson(base_small, palette)
+    # 第三步：模拟画笔重叠渲染（直径必须大于网格间距 scale 才能重叠）
+    # 在这里可以调整笔触风格：scale是网格距，base_radius是笔触半径。
+    pointillism_img = render_color_pointillism(
+        dithered_img, 
+        scale=5,           # 画布网格放大 5 倍
+        base_radius=4,     # 半径 4 (直径 8 > 网格距 5，因此会互相重叠覆盖)
+        jitter=2           # 坐标最大偏移 2 像素
+    )
+    cv2.imwrite(out_final, pointillism_img)
+    logger.info(f"🎉 最终点彩画渲染完成！已保存至: {out_final}")
 
-    canvas = np.full((h, w, 3), 255, dtype=np.uint8)
-    _render_dots(canvas, dithered_base, h_base, w_base, spacing, dot_radius)
-    logger.info(f"大色块层完成：{h_base * w_base} 个点")
-
-    # --- 高光/阴影遮罩（基于原图，保留真实极值）---
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    highlight_mask = gray >= highlight_thresh
-    shadow_mask = gray <= shadow_thresh
-
-    h_ov = max(1, h // overlay_spacing)
-    w_ov = max(1, w // overlay_spacing)
-    white = np.full((h_ov, w_ov, 3), 255, dtype=np.uint8)
-    black = np.zeros((h_ov, w_ov, 3), dtype=np.uint8)
-
-    if highlight_mask.any():
-        logger.info(f"绘制高光叠加层（覆盖 {highlight_mask.mean():.1%} 面积）...")
-        _render_dots(canvas, white, h_ov, w_ov, overlay_spacing, overlay_dot_radius, highlight_mask)
-
-    if shadow_mask.any():
-        logger.info(f"绘制阴影叠加层（覆盖 {shadow_mask.mean():.1%} 面积）...")
-        _render_dots(canvas, black, h_ov, w_ov, overlay_spacing, overlay_dot_radius, shadow_mask)
-
-    return canvas
+if __name__ == "__main__":
+    main()

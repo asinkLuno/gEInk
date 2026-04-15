@@ -9,7 +9,7 @@ from .config import TARGET_HEIGHT, TARGET_WIDTH
 from .dithering_toolkit import apply_dithering
 from .grid_cutter import _grid_cut_image
 from .preprocess_toolkit import _preprocess_image
-from .pointillism_toolkit import apply_pointillism_layered, DEFAULT_PALETTE
+from .pointillism_toolkit import render_pointillism
 
 # Configure loguru to write to stdout for Click CLI testing
 logger.remove()
@@ -123,20 +123,16 @@ def gridcut(input_path, rows, cols):
 @cli.command()
 @click.argument("input_path", type=click.Path(exists=True))
 @click.argument("output_path", type=click.Path(), required=False)
-@click.option("--dot-radius", "-r", type=int, default=5, help="Base layer dot radius in pixels")
-@click.option("--spacing", "-s", type=int, default=8, help="Base layer dot spacing in pixels")
-@click.option("--highlight-thresh", type=int, default=220, help="Brightness >= this gets a highlight overlay (0-255)")
-@click.option("--shadow-thresh", type=int, default=35, help="Brightness <= this gets a shadow overlay (0-255)")
-@click.option("--overlay-radius", type=int, default=2, help="Highlight/shadow overlay dot radius")
-@click.option("--overlay-spacing", type=int, default=5, help="Highlight/shadow overlay dot spacing")
-@click.option("--width", "-w", type=int, default=1200, help="Output width in pixels")
-def pointillize(input_path, output_path, dot_radius, spacing, highlight_thresh, shadow_thresh, overlay_radius, overlay_spacing, width):
+@click.option("--scale", "-s", type=int, default=4, help="Grid upscale factor (controls output resolution)")
+@click.option("--dot-radius", "-r", type=int, default=3, help="Base dot radius in pixels")
+@click.option("--jitter", "-j", type=int, default=1, help="Max random offset per dot in pixels")
+@click.option("--bg-color", type=int, default=245, help="Background gray value (0-255)")
+@click.option("--dot-color", type=int, default=30, help="Dot gray value (0-255)")
+@click.option("--dither", type=click.Choice(["atkinson", "binary_threshold"]), default="atkinson", help="Dithering method")
+@click.option("--width", "-w", type=int, default=600, help="Input resize width before dithering")
+def pointillize(input_path, output_path, scale, dot_radius, jitter, bg_color, dot_color, dither, width):
     """
-    Convert image(s) to layered pointillism art.
-
-    Layer 1: Mean Shift color block segmentation + Atkinson dithering, rendered as
-    non-overlapping dots on white canvas.
-    Layer 2/3: Highlight and shadow regions overlaid with finer dots for depth.
+    Convert image(s) to pointillism art via Atkinson dithering + overlapping dot rendering.
     """
     input_obj = Path(input_path)
 
@@ -149,19 +145,12 @@ def pointillize(input_path, output_path, dot_radius, spacing, highlight_thresh, 
         h, w = img.shape[:2]
         height = int(h * (width / w))
         img_resized = cv2.resize(img, (width, height), interpolation=cv2.INTER_AREA)
+        gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
 
-        logger.info(f"Pointillizing {img_file.name} to {width}x{height}...")
-        art = apply_pointillism_layered(
-            img_resized,
-            palette=DEFAULT_PALETTE,
-            dot_radius=dot_radius,
-            spacing=spacing,
-            highlight_thresh=highlight_thresh,
-            shadow_thresh=shadow_thresh,
-            overlay_dot_radius=overlay_radius,
-            overlay_spacing=overlay_spacing,
-        )
-        
+        logger.info(f"Pointillizing {img_file.name} ({width}x{height} → ×{scale})...")
+        dithered = apply_dithering(gray, dither_method=dither)
+        art = render_pointillism(dithered, scale=scale, base_radius=dot_radius, jitter=jitter, bg_color=bg_color, dot_color=dot_color)
+
         cv2.imwrite(str(out_file), art)
         logger.success(f"Art saved to: {out_file}")
         return True
