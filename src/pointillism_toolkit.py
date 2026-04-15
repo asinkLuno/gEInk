@@ -3,7 +3,15 @@ import cv2
 import random
 from loguru import logger
 
+
 # Atkinson 误差扩散矩阵 (dy, dx, weight)
+def hex_to_bgr(hex_color: str) -> np.ndarray:
+    """将 hex 颜色字符串转换为 OpenCV BGR 格式数组"""
+    hex_color = hex_color.lstrip("#")
+    r, g, b = tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+    return np.array([b, g, r], dtype=np.float32)
+
+
 ATKINSON_KERNEL = [
     (0, 1, 1 / 8),
     (0, 2, 1 / 8),
@@ -13,19 +21,19 @@ ATKINSON_KERNEL = [
     (2, 0, 1 / 8),
 ]
 
-# 用户定义的调色板 (注意: OpenCV 默认读取和显示均为 BGR 格式)
-# 这里的颜色必须以 BGR 顺序排列
+# 用户定义的柔和调色板 (OpenCV BGR 格式)
+# 通过降低饱和度、提高灰度，减少视觉疲劳
+_DEFAULT_PALETTE_HEX = [
+    "#000000",
+    "#FFFFFF",
+    "#ECB4C8",
+    "#EED838",
+    "#CAE9C5",
+    "#DF7E53",
+    "#92CE68",
+]
 DEFAULT_PALETTE = np.array(
-    [
-        [0, 0, 0],  # Black
-        [255, 255, 255],  # White
-        [0, 0, 200],  # Red (沉稳红 B=0, G=0, R=200)
-        [0, 160, 0],  # Green (森林绿)
-        [160, 0, 0],  # Blue (深海蓝)
-        [0, 220, 255],  # Yellow (明黄)
-        [0, 110, 255],  # Orange (活力橙)
-    ],
-    dtype=np.float32,
+    [hex_to_bgr(h) for h in _DEFAULT_PALETTE_HEX], dtype=np.float32
 )
 
 
