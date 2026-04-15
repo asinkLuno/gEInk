@@ -284,11 +284,25 @@ def pointillize(
     default=20,
     help="Trigger threshold for edge detection (lower = more lines)",
 )
+@click.option(
+    "--render",
+    is_flag=True,
+    default=False,
+    help="Automatically render the ASCII .txt to .png using the TypeScript renderer",
+)
+@click.option(
+    "--info-panel",
+    is_flag=True,
+    default=False,
+    help="Add BBS header + Mayday 5525 info panel (passed to renderer)",
+)
 def ascii_art(
     input_path: str,
     input_height: int | None,
     grabcut: bool,
     edge_threshold: int,
+    render: bool,
+    info_panel: bool,
 ) -> None:
     """
     Convert image to ASCII art and save as .txt.
@@ -298,7 +312,7 @@ def ascii_art(
 
     Examples:
         geink ascii-art photo.jpg -i 480
-        geink ascii-art photo.jpg -i 960 --grabcut
+        geink ascii-art photo.jpg -i 960 --grabcut --render
     """
     input_file = Path(input_path)
     img = cv2.imread(str(input_file))
@@ -326,7 +340,32 @@ def ascii_art(
     txt_out = out_dir / f"{input_file.stem}_ascii.txt"
     logger.success(f"Intermediate steps saved to: {out_dir}/")
     logger.success(f"ASCII art saved to: {txt_out}")
-    logger.info(f"Render to PNG: cd render && npx ts-node src/render.ts {txt_out}")
+
+    if render:
+        import subprocess
+
+        render_dir = Path(__file__).parent.parent / "render"
+        render_script = render_dir / "src" / "render.ts"
+
+        if not render_script.exists():
+            logger.error(f"Renderer not found at {render_script}")
+            return
+
+        cmd = ["npx", "ts-node", str(render_script), str(txt_out.resolve())]
+        if info_panel:
+            cmd.append("--info-panel")
+
+        logger.info(f"Rendering: {' '.join(cmd)}")
+        try:
+            # Run in the render directory so it can find tsconfig.json etc.
+            result = subprocess.run(
+                cmd, cwd=str(render_dir), capture_output=True, text=True, check=True
+            )
+            logger.info(result.stdout.strip())
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Rendering failed:\n{e.stderr}")
+    else:
+        logger.info(f"Render to PNG: cd render && npx ts-node src/render.ts {txt_out}")
 
 
 @cli.command()
