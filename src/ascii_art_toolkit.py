@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 import cv2
 import numpy as np
@@ -122,6 +123,8 @@ def render_ascii_art(
     cell_height: int = 12,
     input_height: int = 400,
     grabcut: bool = False,
+    out_dir: Optional[Path] = None,
+    stem: Optional[str] = None,
 ) -> np.ndarray:
     """Convert image to ASCII art rendered with Sarasa Gothic font.
 
@@ -153,8 +156,14 @@ def render_ascii_art(
         fg_mask = _grabcut_fg_mask(img_bgr)
         gray[~fg_mask] = 255
 
+    if out_dir is not None:
+        cv2.imwrite(str(out_dir / f"{stem}_gray.png"), gray)
+
     # === 优化点 1：使用双边滤波替换原本激进的锐化，保边去噪 ===
     gray = cv2.bilateralFilter(gray, d=7, sigmaColor=75, sigmaSpace=75)
+
+    if out_dir is not None:
+        cv2.imwrite(str(out_dir / f"{stem}_bilateral.png"), gray)
 
     h, w = gray.shape
     grid_rows = max(1, h // cell_h)
@@ -167,6 +176,9 @@ def render_ascii_art(
     lower_thresh = int(max(0, (1.0 - 0.33) * median_val))
     upper_thresh = int(min(255, (1.0 + 0.33) * median_val))
     edges = cv2.Canny(resized, lower_thresh, upper_thresh)
+
+    if out_dir is not None:
+        cv2.imwrite(str(out_dir / f"{stem}_edges.png"), edges)
 
     gx = cv2.Sobel(resized, cv2.CV_64F, 1, 0, ksize=3)
     gy = cv2.Sobel(resized, cv2.CV_64F, 0, 1, ksize=3)

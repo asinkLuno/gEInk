@@ -264,7 +264,6 @@ def pointillize(
 
 @cli.command("ascii-art")
 @click.argument("input_path", type=click.Path(exists=True))
-@click.argument("output_path", type=click.Path(), required=False)
 @click.option(
     "--cell-height", "-c", type=int, default=12, help="Font cell height in pixels"
 )
@@ -283,7 +282,6 @@ def pointillize(
 )
 def ascii_art(
     input_path: str,
-    output_path: str | None,
     cell_height: int,
     input_height: int,
     grabcut: bool,
@@ -296,27 +294,28 @@ def ascii_art(
 
     Examples:
         geink ascii-art photo.jpg
-        geink ascii-art photo.jpg out.png --grabcut
+        geink ascii-art photo.jpg --grabcut
     """
-    img = cv2.imread(input_path)
+    input_file = Path(input_path)
+    img = cv2.imread(str(input_file))
     if img is None:
         logger.error(f"Cannot read {input_path}")
         return
 
+    out_dir = input_file.parent / input_file.stem
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     logger.info(
-        f"Rendering ASCII art for {Path(input_path).name} (cell_height={cell_height}, grabcut={grabcut})..."
+        f"Rendering ASCII art for {input_file.name} (cell_height={cell_height}, grabcut={grabcut})..."
     )
     result = render_ascii_art(
-        img, cell_height=cell_height, input_height=input_height, grabcut=grabcut
+        img, cell_height=cell_height, input_height=input_height, grabcut=grabcut, out_dir=out_dir, stem=input_file.stem
     )
 
-    out = (
-        Path(output_path)
-        if output_path
-        else Path(input_path).with_name(Path(input_path).stem + "_ascii.png")
-    )
-    _ = cv2.imwrite(str(out), result)
-    logger.success(f"ASCII art saved to: {out}")
+    final_out = out_dir / f"{input_file.stem}_ascii.png"
+    _ = cv2.imwrite(str(final_out), result)
+    logger.success(f"Intermediate steps saved to: {out_dir}/")
+    logger.success(f"ASCII art saved to: {final_out}")
 
 
 @cli.command()
