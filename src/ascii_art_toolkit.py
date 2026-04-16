@@ -3,12 +3,11 @@ from typing import TYPE_CHECKING, Optional
 
 import cv2
 import numpy as np
-from PIL import Image
 
 if TYPE_CHECKING:
-    from controlnet_aux import HEDdetector
+    from segment_anything import SamAutomaticMaskGenerator
 
-_hed: Optional["HEDdetector"] = None
+_sam: Optional["SamAutomaticMaskGenerator"] = None
 
 # Fixed cell dimensions (half-width monospace character proportions).
 # CELL_H controls grid density: more rows → higher ASCII complexity.
@@ -16,47 +15,59 @@ _hed: Optional["HEDdetector"] = None
 CELL_H = 16
 CELL_W = 8  # half-width: exactly CELL_H / 2
 
-
-def _get_hed() -> "HEDdetector":
-    global _hed
-    if _hed is None:
-        from controlnet_aux import HEDdetector
-
-        _hed = HEDdetector.from_pretrained("lllyasviel/Annotators")
-    return _hed
+_SAM_MODEL_TYPE = "vit_b"
+_SAM_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
+_SAM_FILENAME = "sam_vit_b_01ec64.pth"
 
 
-def _hed_edges(gray: np.ndarray) -> np.ndarray:
-    """Return a thinned and connected edge map via HED.
+def _get_sam() -> "SamAutomaticMaskGenerator":
+    global _sam
+    if _sam is None:
+        import urllib.request
 
-    Applies morphological closing to bridge gaps and skeletonization to extract
-    the 1-pixel wide 'spine' of the edges, resulting in cleaner ASCII art.
+        from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
+
+        cache_dir = Path.home() / ".cache" / "segment_anything"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint = cache_dir / _SAM_FILENAME
+
+        if not checkpoint.exists():
+            print(f"Downloading SAM checkpoint to {checkpoint} …")
+            urllib.request.urlretrieve(_SAM_URL, checkpoint)
+
+        model = sam_model_registry[_SAM_MODEL_TYPE](checkpoint=str(checkpoint))
+        _sam = SamAutomaticMaskGenerator(model)
+    return _sam
+
+
+def _sam_edges(img_rgb: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
+    """Return a thinned edge map via SAM mask boundaries.
+
+    Runs SAM on the full-color img_rgb (at its native resolution), extracts
+    mask boundaries, then resizes the resulting edge map to (target_h, target_w)
+    and skeletonizes for 1-pixel wide edges suitable for ASCII art.
     """
     from skimage.morphology import skeletonize
 
-    h, w = gray.shape
-    rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
-    pil_in = Image.fromarray(rgb)
-    long_side = max(h, w)
+    h, w = img_rgb.shape[:2]
+    masks = _get_sam().generate(img_rgb)
 
-    # HED produces a soft probability map
-    pil_out = _get_hed()(
-        pil_in, detect_resolution=long_side, image_resolution=long_side
-    )
-    if isinstance(pil_out, Image.Image):
-        edge = np.array(pil_out.convert("L"))
-    else:
-        edge = np.array(pil_out)
-        if len(edge.shape) == 3:
-            edge = cv2.cvtColor(edge, cv2.COLOR_RGB2GRAY)
-
-    if edge.shape != (h, w):
-        edge = cv2.resize(edge, (w, h), interpolation=cv2.INTER_LINEAR)
-
-    mask = (edge > 20).astype(np.uint8) * 255
+    edge_map = np.zeros((h, w), dtype=np.uint8)
     kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    skel = skeletonize(mask > 0)
+
+    for mask_dict in masks:
+        seg = mask_dict["segmentation"].astype(np.uint8) * 255
+        eroded = cv2.erode(seg, kernel, iterations=1)
+        boundary = seg - eroded
+        edge_map = np.maximum(edge_map, boundary)
+
+    if (h, w) != (target_h, target_w):
+        # INTER_MAX preserves any edge pixel when downscaling
+        edge_map = cv2.resize(
+            edge_map, (target_w, target_h), interpolation=cv2.INTER_MAX
+        )
+
+    skel = skeletonize(edge_map > 0)
     return skel.astype(np.uint8) * 255
 
 
@@ -179,7 +190,7 @@ def generate_ascii_art(
     Pipeline:
     1. Downscale to input_height (preserve aspect ratio) if provided
     2. GrabCut foreground extraction (optional) — background set to white
-    3. HED edge detection (connect gaps + skeletonize thinning) + Sobel gradients
+    3. SAM edge detection (mask boundaries + skeletonize thinning) + Sobel gradients
     4. Per cell: classify edge char, space for non-edge
     5. Write <stem>_ascii.txt to out_dir if both are given
     """
@@ -206,7 +217,8 @@ def generate_ascii_art(
 
     resized = cv2.resize(gray, (grid_cols * CELL_W, grid_rows * CELL_H))
 
-    edges = _hed_edges(resized)
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    edges = _sam_edges(img_rgb, grid_rows * CELL_H, grid_cols * CELL_W)
 
     if out_dir is not None:
         cv2.imwrite(str(out_dir / f"{stem}_edges.png"), edges)
@@ -237,5 +249,6 @@ def generate_ascii_art(
 
 def ascii_art_font_available() -> bool:
     from pathlib import Path as _Path
+
     sarasa = str(_Path(__file__).parent.parent / "SarasaMonoSC-Regular.ttf")
     return _Path(sarasa).exists()
