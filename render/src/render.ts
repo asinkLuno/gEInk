@@ -90,7 +90,7 @@ function bbsHeaderHtml(): string {
   return `
 <div class="bbs-header">
   <span class="white">歡迎光臨 </span><span class="orange">5525</span><span class="white"> 回到第一天 [目前共有 </span><span class="yellow">5525</span><span class="white"> 人上線]</span><br>
-  <span class="white">請輸入代號 (試用請輸入 \`</span><span class="green">guest</span><span class="white">\`，注冊請輸入 \`</span><span class="green">new</span><span class="white">\`) ：</span><span class="yellow">plumage</span><br>
+  <span class="white">請輸入代號 (試用請輸入 \`</span><span class="green">guest</span><span class="white">\`，注冊請輸入 \`</span><span class="green">new</span><span class="white">\`) ：</span><span class="yellow">mayday</span><br>
   <span class="white">請輸入密碼：</span><span class="white">*******</span>
 </div>`;
 }

@@ -272,10 +272,10 @@ def pointillize(
     help="Downscale input to this height before processing (controls ASCII complexity)",
 )
 @click.option(
-    "--grabcut",
+    "--sam-mask",
     is_flag=True,
     default=False,
-    help="GrabCut foreground extraction before edge detection",
+    help="Use SAM to extract foreground (center-point prompt)",
 )
 @click.option(
     "--edge-threshold",
@@ -299,7 +299,7 @@ def pointillize(
 def ascii_art(
     input_path: str,
     input_height: int | None,
-    grabcut: bool,
+    sam_mask: bool,
     edge_threshold: int,
     render: bool,
     info_panel: bool,
@@ -312,7 +312,7 @@ def ascii_art(
 
     Examples:
         geink ascii-art photo.jpg -i 480
-        geink ascii-art photo.jpg -i 960 --grabcut --render
+        geink ascii-art photo.jpg -i 960 --sam-mask --render
     """
     input_file = Path(input_path)
     img = cv2.imread(str(input_file))
@@ -331,7 +331,7 @@ def ascii_art(
     generate_ascii_art(
         img,
         input_height=input_height,
-        grabcut=grabcut,
+        sam_mask=sam_mask,
         edge_threshold=edge_threshold,
         out_dir=out_dir,
         stem=input_file.stem,

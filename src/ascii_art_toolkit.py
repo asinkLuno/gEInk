@@ -5,9 +5,11 @@ import cv2
 import numpy as np
 
 if TYPE_CHECKING:
-    from segment_anything import SamAutomaticMaskGenerator
+    from segment_anything import SamAutomaticMaskGenerator, SamPredictor
 
-_sam: Optional["SamAutomaticMaskGenerator"] = None
+_sam_model = None
+_sam_gen: Optional["SamAutomaticMaskGenerator"] = None
+_sam_pred: Optional["SamPredictor"] = None
 
 # Fixed cell dimensions (half-width monospace character proportions).
 # CELL_H controls grid density: more rows → higher ASCII complexity.
@@ -20,12 +22,12 @@ _SAM_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth
 _SAM_FILENAME = "sam_vit_b_01ec64.pth"
 
 
-def _get_sam() -> "SamAutomaticMaskGenerator":
-    global _sam
-    if _sam is None:
+def _get_sam_model():
+    global _sam_model
+    if _sam_model is None:
         import urllib.request
 
-        from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
+        from segment_anything import sam_model_registry
 
         cache_dir = Path.home() / ".cache" / "segment_anything"
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -35,9 +37,50 @@ def _get_sam() -> "SamAutomaticMaskGenerator":
             print(f"Downloading SAM checkpoint to {checkpoint} …")
             urllib.request.urlretrieve(_SAM_URL, checkpoint)
 
-        model = sam_model_registry[_SAM_MODEL_TYPE](checkpoint=str(checkpoint))
-        _sam = SamAutomaticMaskGenerator(model)
-    return _sam
+        _sam_model = sam_model_registry[_SAM_MODEL_TYPE](checkpoint=str(checkpoint))
+    return _sam_model
+
+
+def _get_sam_gen() -> "SamAutomaticMaskGenerator":
+    global _sam_gen
+    if _sam_gen is None:
+        from segment_anything import SamAutomaticMaskGenerator
+
+        _sam_gen = SamAutomaticMaskGenerator(_get_sam_model())
+    return _sam_gen
+
+
+def _get_sam_pred() -> "SamPredictor":
+    global _sam_pred
+    if _sam_pred is None:
+        from segment_anything import SamPredictor
+
+        _sam_pred = SamPredictor(_get_sam_model())
+    return _sam_pred
+
+
+def _is_line_art(img_rgb: np.ndarray) -> bool:
+    """Return True if the image looks like line art (bright background, low saturation)."""
+    hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
+    white_ratio = float((hsv[:, :, 2] > 200).mean())
+    sat_mean = float(hsv[:, :, 1].mean())
+    return white_ratio > 0.5 and sat_mean < 30
+
+
+def _line_art_edges(gray: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
+    """Return a skeletonized edge map for line art via Otsu thresholding + Canny."""
+    from skimage.morphology import skeletonize
+
+    # Otsu binarizes dark strokes on bright background; invert so strokes = 255
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    if binary.shape != (target_h, target_w):
+        binary = cv2.resize(
+            binary, (target_w, target_h), interpolation=cv2.INTER_NEAREST
+        )
+
+    skel = skeletonize(binary > 0)
+    return skel.astype(np.uint8) * 255
 
 
 def _sam_edges(img_rgb: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
@@ -50,7 +93,7 @@ def _sam_edges(img_rgb: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
     from skimage.morphology import skeletonize
 
     h, w = img_rgb.shape[:2]
-    masks = _get_sam().generate(img_rgb)
+    masks = _get_sam_gen().generate(img_rgb)
 
     edge_map = np.zeros((h, w), dtype=np.uint8)
     kernel = np.ones((3, 3), np.uint8)
@@ -62,9 +105,9 @@ def _sam_edges(img_rgb: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
         edge_map = np.maximum(edge_map, boundary)
 
     if (h, w) != (target_h, target_w):
-        # INTER_MAX preserves any edge pixel when downscaling
+        # INTER_NEAREST preserves edge pixels better for binary/mask data than linear
         edge_map = cv2.resize(
-            edge_map, (target_w, target_h), interpolation=cv2.INTER_MAX
+            edge_map, (target_w, target_h), interpolation=cv2.INTER_NEAREST
         )
 
     skel = skeletonize(edge_map > 0)
@@ -160,24 +203,29 @@ def _classify_edge_cell(cell_gx: np.ndarray, cell_gy: np.ndarray, cell_h: int) -
     return _angle_to_edge_char(mean_angle)
 
 
-def _grabcut_fg_mask(
-    img_bgr: np.ndarray, margin: float = 0.05, iters: int = 5
-) -> np.ndarray:
-    """Return boolean foreground mask via GrabCut with auto-rect initialization."""
-    h, w = img_bgr.shape[:2]
-    my, mx = max(1, int(h * margin)), max(1, int(w * margin))
-    rect = (mx, my, w - 2 * mx, h - 2 * my)
-    mask = np.zeros((h, w), dtype=np.uint8)
-    bgd = np.zeros((1, 65), dtype=np.float64)
-    fgd = np.zeros((1, 65), dtype=np.float64)
-    cv2.grabCut(img_bgr, mask, rect, bgd, fgd, iters, cv2.GC_INIT_WITH_RECT)
-    return (mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD)
+def _sam_fg_mask(img_rgb: np.ndarray) -> np.ndarray:
+    """Return boolean foreground mask using SAM predictor with a center-point prompt."""
+    h, w = img_rgb.shape[:2]
+    predictor = _get_sam_pred()
+    predictor.set_image(img_rgb)
+
+    # Prompt: Center point of the image
+    input_point = np.array([[w // 2, h // 2]])
+    input_label = np.array([1])  # 1 = foreground
+
+    masks, scores, logits = predictor.predict(
+        point_coords=input_point,
+        point_labels=input_label,
+        multimask_output=True,
+    )
+    # Pick the mask with highest score
+    return masks[np.argmax(scores)]
 
 
 def generate_ascii_art(
     img_bgr: np.ndarray,
     input_height: Optional[int] = None,
-    grabcut: bool = False,
+    sam_mask: bool = False,
     edge_threshold: int = 20,
     out_dir: Optional[Path] = None,
     stem: Optional[str] = None,
@@ -189,7 +237,7 @@ def generate_ascii_art(
 
     Pipeline:
     1. Downscale to input_height (preserve aspect ratio) if provided
-    2. GrabCut foreground extraction (optional) — background set to white
+    2. SAM-based foreground extraction (optional) — background set to white
     3. SAM edge detection (mask boundaries + skeletonize thinning) + Sobel gradients
     4. Per cell: classify edge char, space for non-edge
     5. Write <stem>_ascii.txt to out_dir if both are given
@@ -202,10 +250,11 @@ def generate_ascii_art(
                 img_bgr, (int(w * scale), input_height), interpolation=cv2.INTER_AREA
             )
 
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-    if grabcut:
-        fg_mask = _grabcut_fg_mask(img_bgr)
+    if sam_mask:
+        fg_mask = _sam_fg_mask(img_rgb)
         gray[~fg_mask] = 255
 
     if out_dir is not None:
@@ -217,8 +266,10 @@ def generate_ascii_art(
 
     resized = cv2.resize(gray, (grid_cols * CELL_W, grid_rows * CELL_H))
 
-    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    edges = _sam_edges(img_rgb, grid_rows * CELL_H, grid_cols * CELL_W)
+    if _is_line_art(img_rgb):
+        edges = _line_art_edges(gray, grid_rows * CELL_H, grid_cols * CELL_W)
+    else:
+        edges = _sam_edges(img_rgb, grid_rows * CELL_H, grid_cols * CELL_W)
 
     if out_dir is not None:
         cv2.imwrite(str(out_dir / f"{stem}_edges.png"), edges)

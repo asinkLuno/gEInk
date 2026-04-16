@@ -304,9 +304,9 @@ flowchart TD
     A[输入图片] --> B{是否缩放?}
     B -->|是| C[Resize 到 input-height]
     B -->|否| D[原始尺寸]
-    C --> E{是否 GrabCut?}
+    C --> E{是否 SAM Mask?}
     D --> E
-    E -->|是| F[前景提取]
+    E -->|是| F[中心点提示提取主体]
     E -->|否| G[灰度化]
     F --> G
     G --> H[SAM 边缘检测 + 骨架化]
@@ -323,7 +323,7 @@ flowchart TD
 |------|--------|------|
 | `INPUT_PATH` | (必填) | 输入图片文件路径 |
 | `--input-height` / `-i` | `None` | 处理前的缩放高度（控制 ASCII 复杂度，输入越高细节越多） |
-| `--grabcut` | `False` | 是否在检测边缘前进行 GrabCut 前景提取 |
+| `--sam-mask` | `False` | 是否使用 SAM 进行主体提取（中心点提示） |
 | `--edge-threshold` / `-t` | `20` | 边缘检测触发阈值（越低线条越多） |
 | `--render` | `False` | 是否自动调用 TypeScript 渲染器生成 PNG |
 | `--info-panel` | `False` | 是否添加 BBS 头部和 Mayday 5525 信息面板（需配合 `--render`） |
@@ -334,8 +334,8 @@ flowchart TD
 # 生成 ASCII 艺术并保存为 .txt（复杂度由高度决定，推荐 480 以上）
 geink ascii-art photo.jpg -i 480
 
-# 提取前景并生成高细节 ASCII
-geink ascii-art photo.jpg -i 960 --grabcut
+# 提取主体并生成高细节 ASCII
+geink ascii-art photo.jpg -i 960 --sam-mask
 
 # 生成并自动渲染为 PNG
 geink ascii-art photo.jpg -i 480 --render --info-panel
