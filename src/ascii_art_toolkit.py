@@ -5,10 +5,9 @@ import cv2
 import numpy as np
 
 if TYPE_CHECKING:
-    from segment_anything import SamAutomaticMaskGenerator, SamPredictor
+    from segment_anything import SamPredictor
 
 _sam_model = None
-_sam_gen: Optional["SamAutomaticMaskGenerator"] = None
 _sam_pred: Optional["SamPredictor"] = None
 
 # Fixed cell dimensions (half-width monospace character proportions).
@@ -16,6 +15,19 @@ _sam_pred: Optional["SamPredictor"] = None
 # Expose only input_height to callers; cell size is an internal detail.
 CELL_H = 16
 CELL_W = 8  # half-width: exactly CELL_H / 2
+
+# Braille cell: 2 columns × 4 rows of dots per character.
+# Effective resolution is 4× higher than standard ASCII cells.
+BRAILLE_CELL_H = 4
+BRAILLE_CELL_W = 2
+_BRAILLE_BASE = 0x2800
+# Braille Unicode dot-to-bit mapping: pixel at (row, col) → bit position
+#   col 0  col 1
+#   bit 0  bit 3   row 0
+#   bit 1  bit 4   row 1
+#   bit 2  bit 5   row 2
+#   bit 6  bit 7   row 3
+_BRAILLE_BIT = ((0, 3), (1, 4), (2, 5), (6, 7))
 
 _SAM_MODEL_TYPE = "vit_b"
 _SAM_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
@@ -39,15 +51,6 @@ def _get_sam_model():
 
         _sam_model = sam_model_registry[_SAM_MODEL_TYPE](checkpoint=str(checkpoint))
     return _sam_model
-
-
-def _get_sam_gen() -> "SamAutomaticMaskGenerator":
-    global _sam_gen
-    if _sam_gen is None:
-        from segment_anything import SamAutomaticMaskGenerator
-
-        _sam_gen = SamAutomaticMaskGenerator(_get_sam_model())
-    return _sam_gen
 
 
 def _get_sam_pred() -> "SamPredictor":
@@ -83,34 +86,22 @@ def _line_art_edges(gray: np.ndarray, target_h: int, target_w: int) -> np.ndarra
     return skel.astype(np.uint8) * 255
 
 
-def _sam_edges(img_rgb: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
-    """Return a thinned edge map via SAM mask boundaries.
+def _canny_edges(gray: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
+    """Return a skeletonized edge map via bilateral-filtered Canny.
 
-    Runs SAM on the full-color img_rgb (at its native resolution), extracts
-    mask boundaries, then resizes the resulting edge map to (target_h, target_w)
-    and skeletonizes for 1-pixel wide edges suitable for ASCII art.
+    Bilateral filter smooths texture while preserving structural edges, giving
+    Canny cleaner input than raw grayscale. Thresholds are auto-tuned via Otsu.
     """
     from skimage.morphology import skeletonize
 
-    h, w = img_rgb.shape[:2]
-    masks = _get_sam_gen().generate(img_rgb)
+    smooth = cv2.bilateralFilter(gray, d=9, sigmaColor=75, sigmaSpace=75)
+    otsu, _ = cv2.threshold(smooth, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    edges = cv2.Canny(smooth, max(float(otsu) * 0.33, 10.0), float(otsu))
 
-    edge_map = np.zeros((h, w), dtype=np.uint8)
-    kernel = np.ones((3, 3), np.uint8)
+    if edges.shape != (target_h, target_w):
+        edges = cv2.resize(edges, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
 
-    for mask_dict in masks:
-        seg = mask_dict["segmentation"].astype(np.uint8) * 255
-        eroded = cv2.erode(seg, kernel, iterations=1)
-        boundary = seg - eroded
-        edge_map = np.maximum(edge_map, boundary)
-
-    if (h, w) != (target_h, target_w):
-        # INTER_NEAREST preserves edge pixels better for binary/mask data than linear
-        edge_map = cv2.resize(
-            edge_map, (target_w, target_h), interpolation=cv2.INTER_NEAREST
-        )
-
-    skel = skeletonize(edge_map > 0)
+    skel = skeletonize(edges > 0)
     return skel.astype(np.uint8) * 255
 
 
@@ -222,11 +213,38 @@ def _sam_fg_mask(img_rgb: np.ndarray) -> np.ndarray:
     return masks[np.argmax(scores)]
 
 
+def _edges_to_braille(edges: np.ndarray) -> list[str]:
+    """Convert a binary edge map to Braille Unicode rows.
+
+    Each 2×4 pixel block becomes one Braille character. Dots are lit wherever
+    an edge pixel is non-zero, giving pixel-level fidelity without angle math.
+    The edge map must already be sized to a multiple of (BRAILLE_CELL_H, BRAILLE_CELL_W).
+    """
+    bh, bw = BRAILLE_CELL_H, BRAILLE_CELL_W
+    h, w = edges.shape
+    grid_rows, grid_cols = h // bh, w // bw
+    lit = edges > 0
+    rows: list[str] = []
+    for r in range(grid_rows):
+        chars: list[str] = []
+        for c in range(grid_cols):
+            cell = lit[r * bh : (r + 1) * bh, c * bw : (c + 1) * bw]
+            bits = 0
+            for row in range(bh):
+                for col in range(bw):
+                    if cell[row, col]:
+                        bits |= 1 << _BRAILLE_BIT[row][col]
+            chars.append(chr(_BRAILLE_BASE + bits))
+        rows.append("".join(chars))
+    return rows
+
+
 def generate_ascii_art(
     img_bgr: np.ndarray,
     input_height: Optional[int] = None,
     sam_mask: bool = False,
     edge_threshold: int = 20,
+    braille: bool = False,
     out_dir: Optional[Path] = None,
     stem: Optional[str] = None,
 ) -> list[str]:
@@ -238,8 +256,9 @@ def generate_ascii_art(
     Pipeline:
     1. Downscale to input_height (preserve aspect ratio) if provided
     2. SAM-based foreground extraction (optional) — background set to white
-    3. SAM edge detection (mask boundaries + skeletonize thinning) + Sobel gradients
-    4. Per cell: classify edge char, space for non-edge
+    3. Canny edge detection (bilateral pre-filter + Otsu thresholds)
+    4a. braille=False: per 8×16 cell, classify angle char via Sobel on edge map
+    4b. braille=True:  per 2×4 cell, map lit edge pixels → Braille dots directly
     5. Write <stem>_ascii.txt to out_dir if both are given
     """
     if input_height is not None:
@@ -261,41 +280,53 @@ def generate_ascii_art(
         cv2.imwrite(str(out_dir / f"{stem}_gray.png"), gray)
 
     h, w = gray.shape
-    grid_rows = max(1, h // CELL_H)
-    grid_cols = max(1, w // CELL_W)
 
-    resized = cv2.resize(gray, (grid_cols * CELL_W, grid_rows * CELL_H))
+    if braille:
+        cell_h, cell_w = BRAILLE_CELL_H, BRAILLE_CELL_W
+    else:
+        cell_h, cell_w = CELL_H, CELL_W
+
+    grid_rows = max(1, h // cell_h)
+    grid_cols = max(1, w // cell_w)
 
     if _is_line_art(img_rgb):
-        edges = _line_art_edges(gray, grid_rows * CELL_H, grid_cols * CELL_W)
+        edges = _line_art_edges(gray, grid_rows * cell_h, grid_cols * cell_w)
     else:
-        edges = _sam_edges(img_rgb, grid_rows * CELL_H, grid_cols * CELL_W)
+        edges = _canny_edges(gray, grid_rows * cell_h, grid_cols * cell_w)
 
     if out_dir is not None:
         cv2.imwrite(str(out_dir / f"{stem}_edges.png"), edges)
 
-    gx = cv2.Sobel(resized, cv2.CV_64F, 1, 0, ksize=3)
-    gy = cv2.Sobel(resized, cv2.CV_64F, 0, 1, ksize=3)
+    if braille:
+        rows = _edges_to_braille(edges)
+    else:
+        # Blur the edge map before Sobel so gradient direction comes from edge geometry,
+        # not image texture — avoids mis-classified angles in textured regions.
+        edge_blur = cv2.GaussianBlur(edges.astype(np.float32), (0, 0), sigmaX=2.0)
+        gx = cv2.Sobel(edge_blur, cv2.CV_64F, 1, 0, ksize=3)
+        gy = cv2.Sobel(edge_blur, cv2.CV_64F, 0, 1, ksize=3)
 
-    ascii_rows: list[str] = []
-    for row in range(grid_rows):
-        y0, y1 = row * CELL_H, (row + 1) * CELL_H
-        row_chars: list[str] = []
-        for col in range(grid_cols):
-            x0, x1 = col * CELL_W, (col + 1) * CELL_W
-            if edges[y0:y1, x0:x1].mean() > edge_threshold:
-                char = _classify_edge_cell(gx[y0:y1, x0:x1], gy[y0:y1, x0:x1], CELL_H)
-            else:
-                char = " "
-            row_chars.append(char)
-        ascii_rows.append("".join(row_chars))
+        rows = []
+        for row in range(grid_rows):
+            y0, y1 = row * CELL_H, (row + 1) * CELL_H
+            row_chars: list[str] = []
+            for col in range(grid_cols):
+                x0, x1 = col * CELL_W, (col + 1) * CELL_W
+                if edges[y0:y1, x0:x1].mean() > edge_threshold:
+                    char = _classify_edge_cell(
+                        gx[y0:y1, x0:x1], gy[y0:y1, x0:x1], CELL_H
+                    )
+                else:
+                    char = " "
+                row_chars.append(char)
+            rows.append("".join(row_chars))
 
     if out_dir is not None and stem is not None:
         txt_path = out_dir / f"{stem}_ascii.txt"
         with open(txt_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(ascii_rows))
+            f.write("\n".join(rows))
 
-    return ascii_rows
+    return rows
 
 
 def ascii_art_font_available() -> bool:

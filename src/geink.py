@@ -296,6 +296,18 @@ def pointillize(
     default=False,
     help="Add BBS header + Mayday 5525 info panel (passed to renderer)",
 )
+@click.option(
+    "--scanlines",
+    is_flag=True,
+    default=False,
+    help="Add retro terminal scanline effect (passed to renderer)",
+)
+@click.option(
+    "--braille",
+    is_flag=True,
+    default=False,
+    help="Use Braille Unicode (2×4 dots/char) for 4× higher edge resolution",
+)
 def ascii_art(
     input_path: str,
     input_height: int | None,
@@ -303,6 +315,8 @@ def ascii_art(
     edge_threshold: int,
     render: bool,
     info_panel: bool,
+    scanlines: bool,
+    braille: bool,
 ) -> None:
     """
     Convert image to ASCII art and save as .txt.
@@ -312,7 +326,8 @@ def ascii_art(
 
     Examples:
         geink ascii-art photo.jpg -i 480
-        geink ascii-art photo.jpg -i 960 --sam-mask --render
+        geink ascii-art photo.jpg -i 960 --sam-mask --render --scanlines
+        geink ascii-art photo.jpg -i 480 --braille
     """
     input_file = Path(input_path)
     img = cv2.imread(str(input_file))
@@ -326,6 +341,7 @@ def ascii_art(
     logger.info(
         f"Generating ASCII art for {input_file.name}"
         + (f" (input_height={input_height})" if input_height else "")
+        + (" [braille]" if braille else "")
         + "..."
     )
     generate_ascii_art(
@@ -333,6 +349,7 @@ def ascii_art(
         input_height=input_height,
         sam_mask=sam_mask,
         edge_threshold=edge_threshold,
+        braille=braille,
         out_dir=out_dir,
         stem=input_file.stem,
     )
@@ -354,6 +371,17 @@ def ascii_art(
         cmd = ["npx", "ts-node", str(render_script), str(txt_out.resolve())]
         if info_panel:
             cmd.append("--info-panel")
+        if scanlines:
+            cmd.append("--scanlines")
+        if braille:
+            # Braille cells are CELL_H/BRAILLE_CELL_H = 4× smaller; scale font
+            # down by the same ratio so output image size stays comparable to
+            # ASCII mode at the same --input-height.
+            from .ascii_art_toolkit import BRAILLE_CELL_H, CELL_H
+
+            _default_font = 14
+            _braille_font = max(2, _default_font * BRAILLE_CELL_H // CELL_H)
+            cmd += ["--font-size", str(_braille_font)]
 
         logger.info(f"Rendering: {' '.join(cmd)}")
         try:

@@ -2,7 +2,6 @@ from pathlib import Path
 
 import click
 import cv2
-import numpy as np
 from loguru import logger
 
 from .config import IMAGE_EXTENSIONS

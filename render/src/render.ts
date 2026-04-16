@@ -37,6 +37,7 @@ function parseArgs(argv: string[]): {
   color: string;
   minHeight: number;
   infoPanel: boolean;
+  scanlines: boolean;
 } {
   const args = argv.slice(2);
 
@@ -50,12 +51,21 @@ function parseArgs(argv: string[]): {
         "  --color <hex>     default: #33ff33",
         "  --min-height <n>  default: 1440",
         "  --info-panel      add BBS header + Mayday 5525 panel",
+        "  --scanlines       add retro terminal scanline effect",
       ].join("\n")
     );
     process.exit(1);
   }
 
-  const positional = args.filter((a) => !a.startsWith("--"));
+  const valueFlags = new Set(["--font-size", "--color", "--min-height"]);
+  const positional: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith("--")) {
+      if (valueFlags.has(args[i])) i++; // skip the value token
+    } else {
+      positional.push(args[i]);
+    }
+  }
   const outputPath =
     positional[1] ?? txtPath.replace(/\.txt$/, "_rendered.png");
 
@@ -71,6 +81,7 @@ function parseArgs(argv: string[]): {
     color: flag("color", DEFAULT_COLOR),
     minHeight: parseInt(flag("min-height", String(DEFAULT_MIN_HEIGHT)), 10),
     infoPanel: args.includes("--info-panel"),
+    scanlines: args.includes("--scanlines"),
   };
 }
 
@@ -134,7 +145,8 @@ function buildHtml(
   fontSizePx: number,
   color: string,
   fontDataUri: string,
-  infoPanel: boolean
+  infoPanel: boolean,
+  scanlines: boolean
 ): string {
   const lines = asciiText.split("\n");
   const maxLen = Math.max(...lines.map((l) => l.length));
@@ -142,6 +154,9 @@ function buildHtml(
 
   const header = infoPanel ? bbsHeaderHtml() : "";
   const panel = infoPanel ? infoPanelHtml() : "";
+  const scanlineOverlay = scanlines
+    ? '<div class="scanlines"></div><div class="crt-vignette"></div><div class="crt-glare"></div>'
+    : "";
 
   return `<!DOCTYPE html>
 <html>
@@ -156,17 +171,61 @@ function buildHtml(
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
-    background: #0a0a0a;
+    background: ${scanlines ? "#1b1b1b" : "#0a0a0a"};
     display: inline-block;
   }
   .frame {
+    position: relative;
     padding: ${PADDING}px;
-    background: #0a0a0a;
+    background: ${scanlines ? "#1b1b1b" : "#0a0a0a"};
     font-family: 'SarasaMono', 'Courier New', monospace;
     font-size: ${fontSizePx}px;
     line-height: 1.4;
     letter-spacing: 0;
+    overflow: hidden;
+    ${scanlines ? "border-radius: 12px;" : ""}
   }
+
+  ${scanlines ? `
+  /* CRT: lateral chromatic aberration — pink left, darker-cyan right */
+  pre {
+    text-shadow:
+      -2px 0px 2px #db7497,
+       2px 0px 2px #41bcbc;
+    font-weight: bold;
+  }
+  /* CRT: scanlines */
+  .scanlines {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100%; height: 100%;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent      0px,
+      transparent      2px,
+      rgba(0,0,0,0.55) 2px,
+      rgba(0,0,0,0.55) 4px
+    );
+    z-index: 100;
+    pointer-events: none;
+  }
+  /* CRT: corner vignette */
+  .crt-vignette {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.88) 100%);
+    z-index: 101;
+    pointer-events: none;
+  }
+  /* CRT: top-left screen glare */
+  .crt-glare {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: radial-gradient(ellipse at 28% 18%, rgba(255,255,255,0.05) 0%, transparent 55%);
+    z-index: 102;
+    pointer-events: none;
+  }
+  ` : ""}
 
   /* BBS header */
   .bbs-header {
@@ -225,6 +284,7 @@ function buildHtml(
 </head>
 <body>
 <div class="frame">
+  ${scanlineOverlay}
   ${header}
   <div class="content-row">
     <pre>${escapeHtml(paddedBody)}</pre>
@@ -245,7 +305,8 @@ async function render(
   fontSize: number,
   color: string,
   minHeight: number,
-  infoPanel: boolean
+  infoPanel: boolean,
+  scanlines: boolean
 ): Promise<void> {
   if (!fs.existsSync(txtPath)) {
     throw new Error(`Input file not found: ${txtPath}`);
@@ -256,7 +317,7 @@ async function render(
   const fontData = fs.readFileSync(FONT_PATH);
   const fontDataUri = `data:font/truetype;base64,${fontData.toString("base64")}`;
 
-  const html = buildHtml(asciiText, fontSize, color, fontDataUri, infoPanel);
+  const html = buildHtml(asciiText, fontSize, color, fontDataUri, infoPanel, scanlines);
 
   const tmpHtml = path.join(os.tmpdir(), `geink_render_${Date.now()}.html`);
   fs.writeFileSync(tmpHtml, html, "utf-8");
@@ -328,9 +389,6 @@ async function render(
     await page.evaluate((args: { padding: number; frameW: number; frameH: number }) => {
       const { padding, frameW, frameH } = args;
       const frame = document.querySelector(".frame") as HTMLElement;
-      const pre   = document.querySelector("pre")   as HTMLElement;
-
-      const preH     = pre.scrollHeight;
       const naturalW = frame.scrollWidth;
       const naturalH = frame.scrollHeight;
 
@@ -356,10 +414,10 @@ async function render(
   }
 }
 
-const { txtPath, outputPath, fontSize, color, minHeight, infoPanel } =
+const { txtPath, outputPath, fontSize, color, minHeight, infoPanel, scanlines } =
   parseArgs(process.argv);
 
-render(txtPath, outputPath, fontSize, color, minHeight, infoPanel).catch((err) => {
+render(txtPath, outputPath, fontSize, color, minHeight, infoPanel, scanlines).catch((err) => {
   console.error(err);
   process.exit(1);
 });

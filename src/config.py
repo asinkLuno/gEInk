@@ -52,4 +52,10 @@ BITS_PER_PIXEL = int(math.log2(COLOR_LEVELS))
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"}
 
 # Ensure these variables are accessible by other modules
-__all__ = ["TARGET_WIDTH", "TARGET_HEIGHT", "COLOR_LEVELS", "BITS_PER_PIXEL", "IMAGE_EXTENSIONS"]
+__all__ = [
+    "TARGET_WIDTH",
+    "TARGET_HEIGHT",
+    "COLOR_LEVELS",
+    "BITS_PER_PIXEL",
+    "IMAGE_EXTENSIONS",
+]

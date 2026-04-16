@@ -50,7 +50,9 @@ def load_brush_textures(texture_dir: str) -> list[np.ndarray]:
         return []
 
     # 支持常用的图片格式
-    files = list(path.glob("*.png")) + list(path.glob("*.jpg")) + list(path.glob("*.jpeg"))
+    files = (
+        list(path.glob("*.png")) + list(path.glob("*.jpg")) + list(path.glob("*.jpeg"))
+    )
     for f in files:
         # 使用 IMREAD_UNCHANGED 保留 alpha 通道
         img = cv2.imread(str(f), cv2.IMREAD_UNCHANGED)
@@ -177,33 +179,46 @@ def render_color_pointillism(
                 angle = random.uniform(0, 360)
                 # 将 texture 缩放到 size 约等于 r*3
                 size = r * 3
-                
+
                 # 旋转矩阵逻辑：
                 # 1. 原始纹理中心 (tw/2, th/2)
                 # 2. 目标 patch 中心 (patch_size/2, patch_size/2)
                 th, tw = texture.shape[:2]
                 patch_size = int(size * 1.5)
-                m_rot = cv2.getRotationMatrix2D((tw / 2, th / 2), angle, size / max(th, tw))
-                
+                m_rot = cv2.getRotationMatrix2D(
+                    (tw / 2, th / 2), angle, size / max(th, tw)
+                )
+
                 # 关键修正：调整平移分量，使原始纹理中心映射到 patch 中心
                 m_rot[0, 2] += (patch_size / 2) - (tw / 2)
                 m_rot[1, 2] += (patch_size / 2) - (th / 2)
-                
-                soft_mask = cv2.warpAffine(texture, m_rot, (patch_size, patch_size), flags=cv2.INTER_LINEAR) * alpha
-                
+
+                soft_mask = (
+                    cv2.warpAffine(
+                        texture, m_rot, (patch_size, patch_size), flags=cv2.INTER_LINEAR
+                    )
+                    * alpha
+                )
+
                 local_cx, local_cy = patch_size // 2, patch_size // 2
-                y1, y2 = max(0, final_y - local_cy), min(canvas_h, final_y - local_cy + patch_size)
-                x1, x2 = max(0, final_x - local_cx), min(canvas_w, final_x - local_cx + patch_size)
-                
+                y1, y2 = (
+                    max(0, final_y - local_cy),
+                    min(canvas_h, final_y - local_cy + patch_size),
+                )
+                x1, x2 = (
+                    max(0, final_x - local_cx),
+                    min(canvas_w, final_x - local_cx + patch_size),
+                )
+
                 if y1 >= y2 or x1 >= x2:
                     continue
-                    
+
                 # 裁剪 mask 以匹配画布边缘
                 mask_y1 = y1 - (final_y - local_cy)
                 mask_y2 = mask_y1 + (y2 - y1)
                 mask_x1 = x1 - (final_x - local_cx)
                 mask_x2 = mask_x1 + (x2 - x1)
-                
+
                 soft_mask = soft_mask[mask_y1:mask_y2, mask_x1:mask_x2]
             else:
                 # 局部 patch 边界（含边缘模糊扩展）
