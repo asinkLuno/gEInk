@@ -265,11 +265,11 @@ def pointillize(
 @cli.command("ascii-art")
 @click.argument("input_path", type=click.Path(exists=True))
 @click.option(
-    "--input-height",
-    "-i",
+    "--rows",
+    "-r",
     type=int,
     default=None,
-    help="Downscale input to this height before processing (controls ASCII complexity)",
+    help="Number of ASCII lines in the output (controls detail; proportional columns are computed automatically)",
 )
 @click.option(
     "--sam-mask",
@@ -302,32 +302,24 @@ def pointillize(
     default=False,
     help="Add retro terminal scanline effect (passed to renderer)",
 )
-@click.option(
-    "--braille",
-    is_flag=True,
-    default=False,
-    help="Use Braille Unicode (2×4 dots/char) for 4× higher edge resolution",
-)
 def ascii_art(
     input_path: str,
-    input_height: int | None,
+    rows: int | None,
     sam_mask: bool,
     edge_threshold: int,
     render: bool,
     info_panel: bool,
     scanlines: bool,
-    braille: bool,
 ) -> None:
     """
     Convert image to ASCII art and save as .txt.
 
-    Complexity is controlled by --input-height: taller input → more rows → finer detail.
+    --rows sets exactly how many lines the ASCII output has; columns scale proportionally.
     Use render/ (TypeScript) to turn the .txt into a styled PNG.
 
     Examples:
-        geink ascii-art photo.jpg -i 480
-        geink ascii-art photo.jpg -i 960 --sam-mask --render --scanlines
-        geink ascii-art photo.jpg -i 480 --braille
+        geink ascii-art photo.jpg -r 30
+        geink ascii-art photo.jpg -r 60 --sam-mask --render --scanlines
     """
     input_file = Path(input_path)
     img = cv2.imread(str(input_file))
@@ -340,16 +332,14 @@ def ascii_art(
 
     logger.info(
         f"Generating ASCII art for {input_file.name}"
-        + (f" (input_height={input_height})" if input_height else "")
-        + (" [braille]" if braille else "")
+        + (f" ({rows} rows)" if rows else "")
         + "..."
     )
     generate_ascii_art(
         img,
-        input_height=input_height,
+        num_rows=rows,
         sam_mask=sam_mask,
         edge_threshold=edge_threshold,
-        braille=braille,
         out_dir=out_dir,
         stem=input_file.stem,
     )
@@ -373,16 +363,6 @@ def ascii_art(
             cmd.append("--info-panel")
         if scanlines:
             cmd.append("--scanlines")
-        if braille:
-            # Braille cells are CELL_H/BRAILLE_CELL_H = 4× smaller; scale font
-            # down by the same ratio so output image size stays comparable to
-            # ASCII mode at the same --input-height.
-            from .ascii_art_toolkit import BRAILLE_CELL_H, CELL_H
-
-            _default_font = 14
-            _braille_font = max(2, _default_font * BRAILLE_CELL_H // CELL_H)
-            cmd += ["--font-size", str(_braille_font)]
-
         logger.info(f"Rendering: {' '.join(cmd)}")
         try:
             # Run in the render directory so it can find tsconfig.json etc.

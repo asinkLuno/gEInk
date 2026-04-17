@@ -11,23 +11,8 @@ _sam_model = None
 _sam_pred: Optional["SamPredictor"] = None
 
 # Fixed cell dimensions (half-width monospace character proportions).
-# CELL_H controls grid density: more rows → higher ASCII complexity.
-# Expose only input_height to callers; cell size is an internal detail.
 CELL_H = 16
 CELL_W = 8  # half-width: exactly CELL_H / 2
-
-# Braille cell: 2 columns × 4 rows of dots per character.
-# Effective resolution is 4× higher than standard ASCII cells.
-BRAILLE_CELL_H = 4
-BRAILLE_CELL_W = 2
-_BRAILLE_BASE = 0x2800
-# Braille Unicode dot-to-bit mapping: pixel at (row, col) → bit position
-#   col 0  col 1
-#   bit 0  bit 3   row 0
-#   bit 1  bit 4   row 1
-#   bit 2  bit 5   row 2
-#   bit 6  bit 7   row 3
-_BRAILLE_BIT = ((0, 3), (1, 4), (2, 5), (6, 7))
 
 _SAM_MODEL_TYPE = "vit_b"
 _SAM_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
@@ -109,6 +94,12 @@ def _canny_edges(gray: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
 # Canonical angles: 0°=horizontal, 45°=\, 90°=vertical, 135°=/
 _EDGE_THRESHOLDS = [11.25, 67.5, 112.5, 168.75]
 _EDGE_CHARS = ["_", "\\", "|", "/", "-"]
+
+_H_CHARS = frozenset("-_='.")
+_V_CHARS = frozenset("|()")
+_D1_CHARS = frozenset("\\")
+_D2_CHARS = frozenset("/")
+_ALL_EDGE = _H_CHARS | _V_CHARS | _D1_CHARS | _D2_CHARS | frozenset("+=")
 
 
 def _angle_to_edge_char(edge_angle: float) -> str:
@@ -194,80 +185,140 @@ def _classify_edge_cell(cell_gx: np.ndarray, cell_gy: np.ndarray, cell_h: int) -
     return _angle_to_edge_char(mean_angle)
 
 
+def _merge_edge_segments(rows: list[str], max_gap: int = 2) -> list[str]:
+    """Fill small gaps between co-directional edge chars and remove isolated noise.
+
+    For each direction (H / V / diagonal), scans sequences and fills spaces
+    of length <= max_gap that lie between two runs of the same char family.
+    Then removes any edge char with no non-space 8-connected neighbor.
+    """
+    if not rows:
+        return rows
+
+    nrows = len(rows)
+    ncols = max(len(r) for r in rows)
+    grid = [list(r.ljust(ncols)) for r in rows]
+
+    def _fill_seq(seq: list[str], char_set: frozenset[str]) -> None:
+        n = len(seq)
+        runs: list[tuple[int, int]] = []
+        i = 0
+        while i < n:
+            if seq[i] in char_set:
+                s = i
+                while i < n and seq[i] in char_set:
+                    i += 1
+                runs.append((s, i))
+            else:
+                i += 1
+        for k in range(len(runs) - 1):
+            gap_s, gap_e = runs[k][1], runs[k + 1][0]
+            if 0 < gap_e - gap_s <= max_gap and all(
+                seq[j] == " " for j in range(gap_s, gap_e)
+            ):
+                fill = seq[gap_s - 1]
+                for j in range(gap_s, gap_e):
+                    seq[j] = fill
+
+    # Horizontal
+    for r in range(nrows):
+        _fill_seq(grid[r], _H_CHARS)
+
+    # Vertical
+    for c in range(ncols):
+        col = [grid[r][c] for r in range(nrows)]
+        _fill_seq(col, _V_CHARS)
+        for r in range(nrows):
+            grid[r][c] = col[r]
+
+    # Diagonal \ (c - r = k)
+    for k in range(-(nrows - 1), ncols):
+        r0 = max(0, -k)
+        c0 = r0 + k
+        length = min(nrows - r0, ncols - c0)
+        coords = [(r0 + i, c0 + i) for i in range(length)]
+        if len(coords) >= 2:
+            seq = [grid[r][c] for r, c in coords]
+            _fill_seq(seq, _D1_CHARS)
+            for i, (r, c) in enumerate(coords):
+                grid[r][c] = seq[i]
+
+    # Diagonal / (r + c = k)
+    for k in range(nrows + ncols - 1):
+        r0 = max(0, k - ncols + 1)
+        c0 = k - r0
+        length = min(nrows - r0, c0 + 1)
+        coords = [(r0 + i, c0 - i) for i in range(length)]
+        if len(coords) >= 2:
+            seq = [grid[r][c] for r, c in coords]
+            _fill_seq(seq, _D2_CHARS)
+            for i, (r, c) in enumerate(coords):
+                grid[r][c] = seq[i]
+
+    # Remove isolated noise: edge chars with no non-space 8-neighbor
+    to_clear = [
+        (r, c)
+        for r in range(nrows)
+        for c in range(ncols)
+        if grid[r][c] in _ALL_EDGE
+        and not any(
+            0 <= r + dr < nrows and 0 <= c + dc < ncols and grid[r + dr][c + dc] != " "
+            for dr in (-1, 0, 1)
+            for dc in (-1, 0, 1)
+            if (dr, dc) != (0, 0)
+        )
+    ]
+    for r, c in to_clear:
+        grid[r][c] = " "
+
+    return ["".join(row).rstrip() for row in grid]
+
+
 def _sam_fg_mask(img_rgb: np.ndarray) -> np.ndarray:
     """Return boolean foreground mask using SAM predictor with a center-point prompt."""
     h, w = img_rgb.shape[:2]
     predictor = _get_sam_pred()
     predictor.set_image(img_rgb)
 
-    # Prompt: Center point of the image
     input_point = np.array([[w // 2, h // 2]])
-    input_label = np.array([1])  # 1 = foreground
+    input_label = np.array([1])
 
     masks, scores, logits = predictor.predict(
         point_coords=input_point,
         point_labels=input_label,
         multimask_output=True,
     )
-    # Pick the mask with highest score
     return masks[np.argmax(scores)]
-
-
-def _edges_to_braille(edges: np.ndarray) -> list[str]:
-    """Convert a binary edge map to Braille Unicode rows.
-
-    Each 2×4 pixel block becomes one Braille character. Dots are lit wherever
-    an edge pixel is non-zero, giving pixel-level fidelity without angle math.
-    The edge map must already be sized to a multiple of (BRAILLE_CELL_H, BRAILLE_CELL_W).
-    """
-    bh, bw = BRAILLE_CELL_H, BRAILLE_CELL_W
-    h, w = edges.shape
-    grid_rows, grid_cols = h // bh, w // bw
-    lit = edges > 0
-    rows: list[str] = []
-    for r in range(grid_rows):
-        chars: list[str] = []
-        for c in range(grid_cols):
-            cell = lit[r * bh : (r + 1) * bh, c * bw : (c + 1) * bw]
-            bits = 0
-            for row in range(bh):
-                for col in range(bw):
-                    if cell[row, col]:
-                        bits |= 1 << _BRAILLE_BIT[row][col]
-            chars.append(chr(_BRAILLE_BASE + bits))
-        rows.append("".join(chars))
-    return rows
 
 
 def generate_ascii_art(
     img_bgr: np.ndarray,
-    input_height: Optional[int] = None,
+    num_rows: Optional[int] = None,
     sam_mask: bool = False,
     edge_threshold: int = 20,
-    braille: bool = False,
     out_dir: Optional[Path] = None,
     stem: Optional[str] = None,
 ) -> list[str]:
     """Convert image to ASCII art and return rows as a list of strings.
 
-    Complexity is controlled solely by input_height: a taller input produces
-    more rows (and proportionally more columns), giving finer detail.
+    num_rows controls exactly how many lines the output has. The image is
+    resized so its pixel height equals num_rows * CELL_H, preserving aspect
+    ratio, so columns scale proportionally.
 
     Pipeline:
-    1. Downscale to input_height (preserve aspect ratio) if provided
+    1. Resize to num_rows * CELL_H tall (preserve aspect ratio) if provided
     2. SAM-based foreground extraction (optional) — background set to white
     3. Canny edge detection (bilateral pre-filter + Otsu thresholds)
-    4a. braille=False: per 8×16 cell, classify angle char via Sobel on edge map
-    4b. braille=True:  per 2×4 cell, map lit edge pixels → Braille dots directly
+    4. Per 8×16 cell, classify angle char via Sobel on edge map
     5. Write <stem>_ascii.txt to out_dir if both are given
     """
-    if input_height is not None:
+    if num_rows is not None:
         h, w = img_bgr.shape[:2]
-        if h > input_height:
-            scale = input_height / h
-            img_bgr = cv2.resize(
-                img_bgr, (int(w * scale), input_height), interpolation=cv2.INTER_AREA
-            )
+        target_h = num_rows * CELL_H
+        scale = target_h / h
+        target_w = int(w * scale)
+        interp = cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR
+        img_bgr = cv2.resize(img_bgr, (target_w, target_h), interpolation=interp)
 
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
@@ -280,46 +331,37 @@ def generate_ascii_art(
         cv2.imwrite(str(out_dir / f"{stem}_gray.png"), gray)
 
     h, w = gray.shape
-
-    if braille:
-        cell_h, cell_w = BRAILLE_CELL_H, BRAILLE_CELL_W
-    else:
-        cell_h, cell_w = CELL_H, CELL_W
-
-    grid_rows = max(1, h // cell_h)
-    grid_cols = max(1, w // cell_w)
+    grid_rows = max(1, h // CELL_H)
+    grid_cols = max(1, w // CELL_W)
 
     if _is_line_art(img_rgb):
-        edges = _line_art_edges(gray, grid_rows * cell_h, grid_cols * cell_w)
+        edges = _line_art_edges(gray, grid_rows * CELL_H, grid_cols * CELL_W)
     else:
-        edges = _canny_edges(gray, grid_rows * cell_h, grid_cols * cell_w)
+        edges = _canny_edges(gray, grid_rows * CELL_H, grid_cols * CELL_W)
 
     if out_dir is not None:
         cv2.imwrite(str(out_dir / f"{stem}_edges.png"), edges)
 
-    if braille:
-        rows = _edges_to_braille(edges)
-    else:
-        # Blur the edge map before Sobel so gradient direction comes from edge geometry,
-        # not image texture — avoids mis-classified angles in textured regions.
-        edge_blur = cv2.GaussianBlur(edges.astype(np.float32), (0, 0), sigmaX=2.0)
-        gx = cv2.Sobel(edge_blur, cv2.CV_64F, 1, 0, ksize=3)
-        gy = cv2.Sobel(edge_blur, cv2.CV_64F, 0, 1, ksize=3)
+    # Blur the edge map before Sobel so gradient direction comes from edge geometry,
+    # not image texture — avoids mis-classified angles in textured regions.
+    edge_blur = cv2.GaussianBlur(edges.astype(np.float32), (0, 0), sigmaX=2.0)
+    gx = cv2.Sobel(edge_blur, cv2.CV_64F, 1, 0, ksize=3)
+    gy = cv2.Sobel(edge_blur, cv2.CV_64F, 0, 1, ksize=3)
 
-        rows = []
-        for row in range(grid_rows):
-            y0, y1 = row * CELL_H, (row + 1) * CELL_H
-            row_chars: list[str] = []
-            for col in range(grid_cols):
-                x0, x1 = col * CELL_W, (col + 1) * CELL_W
-                if edges[y0:y1, x0:x1].mean() > edge_threshold:
-                    char = _classify_edge_cell(
-                        gx[y0:y1, x0:x1], gy[y0:y1, x0:x1], CELL_H
-                    )
-                else:
-                    char = " "
-                row_chars.append(char)
-            rows.append("".join(row_chars))
+    rows = []
+    for row in range(grid_rows):
+        y0, y1 = row * CELL_H, (row + 1) * CELL_H
+        row_chars: list[str] = []
+        for col in range(grid_cols):
+            x0, x1 = col * CELL_W, (col + 1) * CELL_W
+            if edges[y0:y1, x0:x1].mean() > edge_threshold:
+                char = _classify_edge_cell(gx[y0:y1, x0:x1], gy[y0:y1, x0:x1], CELL_H)
+            else:
+                char = " "
+            row_chars.append(char)
+        rows.append("".join(row_chars))
+
+    rows = _merge_edge_segments(rows)
 
     if out_dir is not None and stem is not None:
         txt_path = out_dir / f"{stem}_ascii.txt"
