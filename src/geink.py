@@ -1,3 +1,5 @@
+import json
+import subprocess
 from pathlib import Path
 
 import click
@@ -15,8 +17,7 @@ from .pointillism_toolkit import (
     DEFAULT_PALETTE,
     color_atkinson_dithering,
     create_color_blocks,
-    load_brush_textures,
-    render_color_pointillism,
+    export_dots_json,
 )
 from .preprocess_toolkit import preprocess_image
 
@@ -149,16 +150,18 @@ def gridcut(input_path: str, rows: int, cols: int) -> None:
     help="Mean-shift color radius for color blocking",
 )
 @click.option(
-    "--scale", "-s", type=int, default=5, help="Canvas upscale factor (grid spacing)"
+    "--dot-ratio",
+    "-r",
+    type=float,
+    default=0.01,
+    help="Dot radius as fraction of image short side (e.g. 0.01 = 1%)",
 )
 @click.option(
-    "--dot-radius", "-r", type=int, default=4, help="Base dot radius in pixels"
-)
-@click.option(
-    "--jitter", "-j", type=int, default=2, help="Max random offset per dot in pixels"
-)
-@click.option(
-    "--max-dim", type=int, default=600, help="Resize input so longest side ≤ this value"
+    "--jitter",
+    "-j",
+    type=float,
+    default=0.3,
+    help="Max random offset as fraction of dot radius (e.g. 0.3 = 30%% of dot_radius)",
 )
 @click.option(
     "--alpha",
@@ -173,10 +176,8 @@ def pointillize(
     output_path: str | None,
     spatial_rad: int,
     color_rad: int,
-    scale: int,
-    dot_radius: int,
-    jitter: int,
-    max_dim: int,
+    dot_ratio: float,
+    jitter: float,
     pipeline_alpha: float,
 ) -> None:
     """
@@ -190,8 +191,9 @@ def pointillize(
     """
     input_obj = Path(input_path)
 
-    # 在此处加载纹理，避免在循环中重复加载
-    brush_textures = load_brush_textures("oil_paint_texture")
+    _render_dir = Path(__file__).parent.parent / "render"
+    _ts_node = _render_dir / "node_modules" / ".bin" / "ts-node"
+    _renderer = _render_dir / "src" / "pointillism.ts"
 
     def process_one(img_file: Path, out_file: Path) -> bool:
         img = cv2.imread(str(img_file))
@@ -200,20 +202,15 @@ def pointillize(
             return False
 
         h, w = img.shape[:2]
-        if max(h, w) > max_dim:
-            factor = float(max_dim / max(h, w))
-            img = cv2.resize(
-                img,
-                (int(w * factor), int(h * factor)),
-                interpolation=cv2.INTER_AREA,
-            )
+        dot_radius = max(1, round(dot_ratio * min(h, w)))
+        jitter_px = max(1, round(jitter * dot_radius))
 
         # 创建同名目录保存中间步骤和成品
         out_dir = img_file.parent / img_file.stem
         out_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(
-            f"Pointillizing {img_file.name} {img.shape[1]}x{img.shape[0]} → ×{scale}..."
+            f"Pointillizing {img_file.name} {w}x{h}, dot_radius={dot_radius}px ({dot_ratio:.1%} of short side)..."
         )
 
         # 步骤 1：色块化
@@ -224,19 +221,30 @@ def pointillize(
         dithered = color_atkinson_dithering(blocked, DEFAULT_PALETTE)
         cv2.imwrite(str(out_dir / f"{img_file.stem}_dithered.png"), dithered)
 
-        # 步骤 3：点彩渲染
-        art = render_color_pointillism(
+        # 步骤 3：导出点数据
+        dots_data = export_dots_json(
             dithered,
-            scale=scale,
             base_radius=dot_radius,
-            jitter=jitter,
+            jitter=jitter_px,
             alpha=pipeline_alpha,
-            brush_textures=brush_textures,
         )
+        dots_json = out_dir / f"{img_file.stem}_dots.json"
+        with open(dots_json, "w") as f:
+            json.dump(dots_data, f)
 
-        # 最终输出也保存在同名目录中
+        # 步骤 4：Node.js Canvas 渲染
         final_out = out_dir / f"{img_file.stem}_pointillism.png"
-        _ = cv2.imwrite(str(final_out), art)
+        logger.info("调用 Node.js Canvas 渲染...")
+        result = subprocess.run(
+            [str(_ts_node), str(_renderer), str(dots_json.resolve()), str(final_out.resolve())],
+            cwd=str(_render_dir),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            logger.error(f"Node.js 渲染失败:\n{result.stderr}")
+            return False
+        logger.info(result.stdout.strip())
 
         logger.success(f"Intermediate steps saved to: {out_dir}/")
         logger.success(f"Final art saved to: {final_out}")
@@ -272,12 +280,6 @@ def pointillize(
     help="Number of ASCII lines in the output (controls detail; proportional columns are computed automatically)",
 )
 @click.option(
-    "--sam-mask",
-    is_flag=True,
-    default=False,
-    help="Use SAM to extract foreground (center-point prompt)",
-)
-@click.option(
     "--edge-threshold",
     "-t",
     type=int,
@@ -305,7 +307,6 @@ def pointillize(
 def ascii_art(
     input_path: str,
     rows: int | None,
-    sam_mask: bool,
     edge_threshold: int,
     render: bool,
     info_panel: bool,
@@ -319,7 +320,7 @@ def ascii_art(
 
     Examples:
         geink ascii-art photo.jpg -r 30
-        geink ascii-art photo.jpg -r 60 --sam-mask --render --scanlines
+        geink ascii-art photo.jpg -r 60 --render --scanlines
     """
     input_file = Path(input_path)
     img = cv2.imread(str(input_file))
@@ -338,7 +339,6 @@ def ascii_art(
     generate_ascii_art(
         img,
         num_rows=rows,
-        sam_mask=sam_mask,
         edge_threshold=edge_threshold,
         out_dir=out_dir,
         stem=input_file.stem,

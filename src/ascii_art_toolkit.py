@@ -1,50 +1,12 @@
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import cv2
 import numpy as np
 
-if TYPE_CHECKING:
-    from segment_anything import SamPredictor
-
-_sam_model = None
-_sam_pred: Optional["SamPredictor"] = None
-
 # Fixed cell dimensions (half-width monospace character proportions).
 CELL_H = 16
 CELL_W = 8  # half-width: exactly CELL_H / 2
-
-_SAM_MODEL_TYPE = "vit_b"
-_SAM_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
-_SAM_FILENAME = "sam_vit_b_01ec64.pth"
-
-
-def _get_sam_model():
-    global _sam_model
-    if _sam_model is None:
-        import urllib.request
-
-        from segment_anything import sam_model_registry
-
-        cache_dir = Path.home() / ".cache" / "segment_anything"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        checkpoint = cache_dir / _SAM_FILENAME
-
-        if not checkpoint.exists():
-            print(f"Downloading SAM checkpoint to {checkpoint} …")
-            urllib.request.urlretrieve(_SAM_URL, checkpoint)
-
-        _sam_model = sam_model_registry[_SAM_MODEL_TYPE](checkpoint=str(checkpoint))
-    return _sam_model
-
-
-def _get_sam_pred() -> "SamPredictor":
-    global _sam_pred
-    if _sam_pred is None:
-        from segment_anything import SamPredictor
-
-        _sam_pred = SamPredictor(_get_sam_model())
-    return _sam_pred
 
 
 def _is_line_art(img_rgb: np.ndarray) -> bool:
@@ -274,27 +236,9 @@ def _merge_edge_segments(rows: list[str], max_gap: int = 2) -> list[str]:
     return ["".join(row).rstrip() for row in grid]
 
 
-def _sam_fg_mask(img_rgb: np.ndarray) -> np.ndarray:
-    """Return boolean foreground mask using SAM predictor with a center-point prompt."""
-    h, w = img_rgb.shape[:2]
-    predictor = _get_sam_pred()
-    predictor.set_image(img_rgb)
-
-    input_point = np.array([[w // 2, h // 2]])
-    input_label = np.array([1])
-
-    masks, scores, logits = predictor.predict(
-        point_coords=input_point,
-        point_labels=input_label,
-        multimask_output=True,
-    )
-    return masks[np.argmax(scores)]
-
-
 def generate_ascii_art(
     img_bgr: np.ndarray,
     num_rows: Optional[int] = None,
-    sam_mask: bool = False,
     edge_threshold: int = 20,
     out_dir: Optional[Path] = None,
     stem: Optional[str] = None,
@@ -307,10 +251,9 @@ def generate_ascii_art(
 
     Pipeline:
     1. Resize to num_rows * CELL_H tall (preserve aspect ratio) if provided
-    2. SAM-based foreground extraction (optional) — background set to white
-    3. Canny edge detection (bilateral pre-filter + Otsu thresholds)
-    4. Per 8×16 cell, classify angle char via Sobel on edge map
-    5. Write <stem>_ascii.txt to out_dir if both are given
+    2. Canny edge detection (bilateral pre-filter + Otsu thresholds)
+    3. Per 8×16 cell, classify angle char via Sobel on edge map
+    4. Write <stem>_ascii.txt to out_dir if both are given
     """
     if num_rows is not None:
         h, w = img_bgr.shape[:2]
@@ -322,10 +265,6 @@ def generate_ascii_art(
 
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-
-    if sam_mask:
-        fg_mask = _sam_fg_mask(img_rgb)
-        gray[~fg_mask] = 255
 
     if out_dir is not None:
         cv2.imwrite(str(out_dir / f"{stem}_gray.png"), gray)
