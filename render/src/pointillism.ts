@@ -12,6 +12,7 @@ interface Dot {
 interface DotsData {
   width: number;
   height: number;
+  step: number;
   bg: [number, number, number];
   alpha: number;
   texture_dir: string | null;
@@ -38,16 +39,21 @@ async function main() {
   }
 
   const data: DotsData = JSON.parse(fs.readFileSync(inputPath, "utf8"));
-  const { width, height, bg, alpha, texture_dir, dots } = data;
+  const { bg, step, alpha, texture_dir, dots } = data;
+  const maxGradR = step / 2;
 
   const textures = texture_dir ? await loadTextures(texture_dir) : [];
   console.log(`loaded ${textures.length} brush textures`);
 
-  const canvas = createCanvas(width, height);
+  // canvas size derived from actual dot extents, not original image dimensions
+  const canvasW = Math.ceil(dots.reduce((m, d) => Math.max(m, d.x + maxGradR), 0));
+  const canvasH = Math.ceil(dots.reduce((m, d) => Math.max(m, d.y + maxGradR), 0));
+
+  const canvas = createCanvas(canvasW, canvasH);
   const ctx = canvas.getContext("2d");
 
   ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
-  ctx.fillRect(0, 0, width, height);
+  ctx.fillRect(0, 0, canvasW, canvasH);
 
   ctx.globalCompositeOperation = "source-over";
 
@@ -76,13 +82,14 @@ async function main() {
       ctx.drawImage(stamp, x - size, y - size);
     } else {
       // fallback: radial gradient
-      const grad = ctx.createRadialGradient(x, y, 0, x, y, r * 2);
+      const gradR = Math.min(r, maxGradR);
+      const grad = ctx.createRadialGradient(x, y, 0, x, y, gradR);
       grad.addColorStop(0, `rgba(${cr},${cg},${cb},${alpha})`);
-      grad.addColorStop(0.55, `rgba(${cr},${cg},${cb},${(alpha * 0.5).toFixed(3)})`);
+      grad.addColorStop(0.5, `rgba(${cr},${cg},${cb},${(alpha * 0.6).toFixed(3)})`);
       grad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(x, y, r * 2, 0, Math.PI * 2);
+      ctx.arc(x, y, gradR, 0, Math.PI * 2);
       ctx.fill();
     }
   }

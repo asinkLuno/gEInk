@@ -195,7 +195,6 @@ def pointillize(
     _render_dir = Path(__file__).parent.parent / "render"
     _ts_node = _render_dir / "node_modules" / ".bin" / "ts-node"
     _renderer = _render_dir / "src" / "pointillism.ts"
-    _texture_dir = prepare_textures(str(Path(__file__).parent.parent / "oil_paint_texture"), only=["00.png"])
 
     def process_one(img_file: Path, out_file: Path) -> bool:
         img = cv2.imread(str(img_file))
@@ -229,7 +228,7 @@ def pointillize(
             base_radius=dot_radius,
             jitter=jitter_px,
             alpha=pipeline_alpha,
-            texture_dir=_texture_dir,
+            texture_dir=None,
         )
         dots_json = out_dir / f"{img_file.stem}_dots.json"
         with open(dots_json, "w") as f:

@@ -164,6 +164,7 @@ def export_dots_json(
     return {
         "width": w,
         "height": h,
+        "step": step,
         "bg": bg_rgb,
         "alpha": alpha,
         "texture_dir": texture_dir,
