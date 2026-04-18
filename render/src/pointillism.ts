@@ -82,14 +82,9 @@ async function main() {
       ctx.drawImage(stamp, x - size, y - size);
     } else {
       // fallback: radial gradient
-      const gradR = Math.min(r, maxGradR);
-      const grad = ctx.createRadialGradient(x, y, 0, x, y, gradR);
-      grad.addColorStop(0, `rgba(${cr},${cg},${cb},${alpha})`);
-      grad.addColorStop(0.5, `rgba(${cr},${cg},${cb},${(alpha * 0.6).toFixed(3)})`);
-      grad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
-      ctx.fillStyle = grad;
+      ctx.fillStyle = `rgba(${cr},${cg},${cb},${alpha})`;
       ctx.beginPath();
-      ctx.arc(x, y, gradR, 0, Math.PI * 2);
+      ctx.arc(x, y, Math.min(r, maxGradR), 0, Math.PI * 2);
       ctx.fill();
     }
   }
