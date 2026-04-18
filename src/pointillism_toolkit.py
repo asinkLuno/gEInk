@@ -6,6 +6,39 @@ import numpy as np
 from loguru import logger
 
 
+def prepare_textures(src_dir: str, only: list[str] | None = None) -> str:
+    """
+    将 src_dir 里的笔触 PNG 用 PIL 重新编码到 <src_dir>/.fixed/，
+    修复 CRC 损坏等问题，使 Node.js canvas 可以正常加载。
+    返回修复后的目录路径。
+    """
+    from PIL import Image, ImageFile
+
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+    src = Path(src_dir)
+    dst = src / ".fixed"
+    dst.mkdir(exist_ok=True)
+
+    files = [f for ext in ("*.png", "*.jpg", "*.jpeg") for f in src.glob(ext)]
+    if only is not None:
+        files = [f for f in files if f.name in only]
+    for f in files:
+        out = dst / f.name
+        if out.exists():
+            continue
+        try:
+            img = Image.open(f)
+            img.load()
+            img.save(out, format="PNG")
+        except Exception as e:
+            logger.warning(f"跳过损坏纹理 {f.name}: {e}")
+
+    count = len(list(dst.glob("*.png")))
+    logger.info(f"笔触纹理已准备: {count} 个 → {dst}")
+    return str(dst)
+
+
 def hex_to_bgr(hex_color: str) -> np.ndarray:
     """将 hex 颜色字符串转换为 OpenCV BGR 格式数组"""
     hex_color = hex_color.lstrip("#")
@@ -27,11 +60,11 @@ ATKINSON_KERNEL: list[tuple[int, int, float]] = [
 _DEFAULT_PALETTE_HEX = [
     "#000000",
     "#FFFFFF",
-    "#ECB4C8",
-    "#EED838",
-    "#CAE9C5",
-    "#DF7E53",
-    "#92CE68",
+    "#26A7E1",
+    "#13AF68",
+    "#E95412",
+    "#FFE009",
+    "#E274A9",
 ]
 DEFAULT_PALETTE: np.ndarray = np.array(
     [hex_to_bgr(h) for h in _DEFAULT_PALETTE_HEX], dtype=np.float32
@@ -100,6 +133,7 @@ def export_dots_json(
     jitter: int = 1,
     bg_color: tuple[int, int, int] = (240, 245, 245),  # BGR
     alpha: float = 0.5,
+    texture_dir: str | None = None,
 ) -> dict:
     """
     第三阶段（数据）：将抖动后的像素矩阵转换为点列表，供 Node.js Canvas 渲染。
@@ -108,7 +142,7 @@ def export_dots_json(
     h, w = dithered_img.shape[:2]
     logger.info(f"生成点彩数据... (基础半径: {base_radius}px)")
 
-    step = max(1, base_radius)  # 点间距 = 半径，轻微重叠
+    step = max(1, base_radius * 2)  # 点间距 = 直径，点之间刚好相切
     dots = []
     for y in range(step // 2, h, step):
         for x in range(step // 2, w, step):
@@ -132,5 +166,6 @@ def export_dots_json(
         "height": h,
         "bg": bg_rgb,
         "alpha": alpha,
+        "texture_dir": texture_dir,
         "dots": dots,
     }
