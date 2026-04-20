@@ -18,7 +18,6 @@ from .pointillism_toolkit import (
     color_atkinson_dithering,
     create_color_blocks,
     export_dots_json,
-    prepare_textures,
 )
 from .preprocess_toolkit import preprocess_image
 
@@ -172,6 +171,12 @@ def gridcut(input_path: str, rows: int, cols: int) -> None:
     default=0.5,
     help="Watercolor dot opacity (0=transparent, 1=opaque)",
 )
+@click.option(
+    "--dither",
+    type=click.Choice(["floyd_steinberg", "stucki", "atkinson"]),
+    default="floyd_steinberg",
+    help="Dithering algorithm: floyd_steinberg (best for photos), stucki (smoothest), atkinson (graphics)",
+)
 def pointillize(
     input_path: str,
     output_path: str | None,
@@ -180,11 +185,12 @@ def pointillize(
     dot_ratio: float,
     jitter: float,
     pipeline_alpha: float,
+    dither: str,
 ) -> None:
     """
     Convert image(s) to color pointillism art.
 
-    Pipeline: mean-shift color blocking → 7-color Atkinson dithering → overlapping dot rendering.
+    Pipeline: mean-shift color blocking → 7-color dithering → overlapping dot rendering.
 
     Examples:
         geink pointillize photo.jpg
@@ -219,7 +225,7 @@ def pointillize(
         cv2.imwrite(str(out_dir / f"{img_file.stem}_blocked.png"), blocked)
 
         # 步骤 2：抖动
-        dithered = color_atkinson_dithering(blocked, DEFAULT_PALETTE)
+        dithered = color_atkinson_dithering(blocked, DEFAULT_PALETTE, method=dither)
         cv2.imwrite(str(out_dir / f"{img_file.stem}_dithered.png"), dithered)
 
         # 步骤 3：导出点数据
@@ -238,7 +244,12 @@ def pointillize(
         final_out = out_dir / f"{img_file.stem}_pointillism.png"
         logger.info("调用 Node.js Canvas 渲染...")
         result = subprocess.run(
-            [str(_ts_node), str(_renderer), str(dots_json.resolve()), str(final_out.resolve())],
+            [
+                str(_ts_node),
+                str(_renderer),
+                str(dots_json.resolve()),
+                str(final_out.resolve()),
+            ],
             cwd=str(_render_dir),
             capture_output=True,
             text=True,

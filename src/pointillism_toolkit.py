@@ -5,6 +5,8 @@ import cv2
 import numpy as np
 from loguru import logger
 
+from .dithering_toolkit import DITHER_KERNELS, FLOYD_STEINBERG_KERNEL, error_diffusion
+
 
 def prepare_textures(src_dir: str, only: list[str] | None = None) -> str:
     """
@@ -46,16 +48,6 @@ def hex_to_bgr(hex_color: str) -> np.ndarray:
     return np.array([b, g, r], dtype=np.float32)
 
 
-# Atkinson 误差扩散矩阵 (dy, dx, weight)
-ATKINSON_KERNEL: list[tuple[int, int, float]] = [
-    (0, 1, 1 / 8),
-    (0, 2, 1 / 8),
-    (1, -1, 1 / 8),
-    (1, 0, 1 / 8),
-    (1, 1, 1 / 8),
-    (2, 0, 1 / 8),
-]
-
 # 用户定义的柔和调色板 (OpenCV BGR 格式)
 _DEFAULT_PALETTE_HEX = [
     "#000000",
@@ -69,8 +61,6 @@ _DEFAULT_PALETTE_HEX = [
 DEFAULT_PALETTE: np.ndarray = np.array(
     [hex_to_bgr(h) for h in _DEFAULT_PALETTE_HEX], dtype=np.float32
 )
-
-
 
 
 def create_color_blocks(
@@ -94,37 +84,22 @@ def find_closest_palette_color(pixel: np.ndarray, palette: np.ndarray) -> np.nda
     return palette[closest_index]
 
 
-def color_atkinson_dithering(color_img: np.ndarray, palette: np.ndarray) -> np.ndarray:
+def color_atkinson_dithering(
+    color_img: np.ndarray,
+    palette: np.ndarray,
+    method: str = "floyd_steinberg",
+) -> np.ndarray:
     """
     第二阶段：数字排线与光学混合
-    对彩色图像进行三通道 Atkinson 抖动，利用调色板中的纯色交替排布来混合出原本不存在的颜色。
+    method: "floyd_steinberg" (default, best for photos), "stucki" (smoothest), "atkinson" (graphics)
     """
-    dithered = color_img.astype(np.float32)
-    height, width = dithered.shape[:2]
-
-    logger.info("应用彩色 Atkinson 抖动 (计算光学混合)...")
-
-    for y in range(height):
-        for x in range(width):
-            old_pixel = dithered[y, x].copy()
-
-            # 寻找调色板中最接近的颜色
-            new_pixel = find_closest_palette_color(old_pixel, palette)
-            dithered[y, x] = new_pixel
-
-            # 计算三通道误差向量 (B, G, R 的偏差)
-            error = old_pixel - new_pixel
-
-            if np.all(error == 0):
-                continue
-
-            # 将色彩误差扩散给尚未处理的周围像素
-            for dy, dx, w in ATKINSON_KERNEL:
-                ny, nx = y + dy, x + dx
-                if 0 <= ny < height and 0 <= nx < width:
-                    dithered[ny, nx] += error * w
-
-    return np.clip(dithered, 0, 255).astype(np.uint8)
+    kernel = DITHER_KERNELS.get(method, FLOYD_STEINBERG_KERNEL)
+    logger.info(f"应用彩色 {method} 抖动 (计算光学混合)...")
+    return error_diffusion(
+        color_img,
+        lambda p: find_closest_palette_color(p, palette),
+        kernel,
+    )
 
 
 def export_dots_json(
