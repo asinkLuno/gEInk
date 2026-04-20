@@ -64,12 +64,17 @@ DEFAULT_PALETTE: np.ndarray = np.array(
 
 
 def create_color_blocks(
-    img: np.ndarray, spatial_rad: int = 15, color_rad: int = 40
+    img: np.ndarray, spatial_rad: int | None = None, color_rad: int | None = None
 ) -> np.ndarray:
     """
     第一阶段：底稿概括
     使用均值漂移滤波抹平细碎纹理，保留结构边缘，划分出明确的大色块。
+    spatial_rad=None 或 color_rad=None 时跳过此阶段，直接返回原图。
     """
+    if spatial_rad is None or color_rad is None:
+        logger.info("跳过平滑减色处理")
+        return img
+
     logger.info(
         f"正在进行平滑减色处理 (空间半径:{spatial_rad}, 色彩半径:{color_rad})...这可能需要几秒钟"
     )
