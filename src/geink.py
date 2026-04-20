@@ -140,14 +140,14 @@ def gridcut(input_path: str, rows: int, cols: int) -> None:
 @click.option(
     "--spatial-rad",
     type=int,
-    default=15,
-    help="Mean-shift spatial radius for color blocking",
+    default=None,
+    help="Mean-shift spatial radius for color blocking (omit to skip color blocking)",
 )
 @click.option(
     "--color-rad",
     type=int,
-    default=40,
-    help="Mean-shift color radius for color blocking",
+    default=None,
+    help="Mean-shift color radius for color blocking (omit to skip color blocking)",
 )
 @click.option(
     "--dot-ratio",
@@ -180,8 +180,8 @@ def gridcut(input_path: str, rows: int, cols: int) -> None:
 def pointillize(
     input_path: str,
     output_path: str | None,
-    spatial_rad: int,
-    color_rad: int,
+    spatial_rad: int | None,
+    color_rad: int | None,
     dot_ratio: float,
     jitter: float,
     pipeline_alpha: float,
