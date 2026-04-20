@@ -37,11 +37,42 @@ STUCKI_KERNEL: list[tuple[int, int, float]] = [
     (2, 2, 1 / 42),
 ]
 
+# JJN (Jarvis, Judice, Ninke): full error over 12 neighbors — similar to Stucki, slightly softer
+JJN_KERNEL: list[tuple[int, int, float]] = [
+    (0, 1, 7 / 48),
+    (0, 2, 5 / 48),
+    (1, -2, 3 / 48),
+    (1, -1, 5 / 48),
+    (1, 0, 7 / 48),
+    (1, 1, 5 / 48),
+    (1, 2, 3 / 48),
+    (2, -2, 1 / 48),
+    (2, -1, 3 / 48),
+    (2, 0, 5 / 48),
+    (2, 1, 3 / 48),
+    (2, 2, 1 / 48),
+]
+
 DITHER_KERNELS: dict[str, list[tuple[int, int, float]]] = {
     "atkinson": ATKINSON_KERNEL,
     "floyd_steinberg": FLOYD_STEINBERG_KERNEL,
     "stucki": STUCKI_KERNEL,
+    "jjn": JJN_KERNEL,
 }
+
+# 4x4 Bayer ordered dithering matrix
+BAYER_MATRIX_4x4: np.ndarray = (
+    np.array(
+        [
+            [0, 8, 2, 10],
+            [12, 4, 14, 6],
+            [3, 11, 1, 9],
+            [15, 7, 13, 5],
+        ],
+        dtype=np.float32,
+    )
+    / 16.0
+)  # normalize to [0, 1)
 
 
 def error_diffusion(
@@ -78,6 +109,35 @@ def binary_thresholding(gray_img: np.ndarray, threshold: int = 128) -> np.ndarra
     return result.astype(np.uint8)
 
 
+def bayer_dithering(
+    gray_img: np.ndarray, matrix: np.ndarray = BAYER_MATRIX_4x4
+) -> np.ndarray:
+    h, w = gray_img.shape[:2]
+    mh, mw = matrix.shape
+    tiled = np.tile(matrix, (h // mh + 1, w // mw + 1))[:h, :w]
+    normalized = gray_img.astype(np.float32) / 255.0
+    return np.where(normalized > tiled, 255, 0).astype(np.uint8)
+
+
+def color_bayer_dithering(
+    color_img: np.ndarray,
+    quantize_fn: Callable[[np.ndarray], np.ndarray],
+    matrix: np.ndarray = BAYER_MATRIX_4x4,
+) -> np.ndarray:
+    """Ordered (Bayer) dithering for color images with arbitrary palette quantization."""
+    h, w = color_img.shape[:2]
+    mh, mw = matrix.shape
+    tiled = np.tile(matrix, (h // mh + 1, w // mw + 1))[:h, :w]  # (h, w) in [0,1)
+    # perturb each pixel by the bayer threshold before palette snapping
+    perturbed = color_img.astype(np.float32) + (tiled[:, :, np.newaxis] - 0.5) * 255.0
+    perturbed = np.clip(perturbed, 0, 255).astype(np.uint8)
+    result = np.empty_like(perturbed)
+    for y in range(h):
+        for x in range(w):
+            result[y, x] = quantize_fn(perturbed[y, x].astype(np.float32))
+    return result
+
+
 def apply_dithering(
     gray_img: np.ndarray,
     dither_method: str = "atkinson",
@@ -85,10 +145,13 @@ def apply_dithering(
     if dither_method == "binary_threshold":
         logger.info("应用 binary_threshold 抖动（1-bit）。")
         return binary_thresholding(gray_img)
+    if dither_method == "bayer":
+        logger.info("应用 bayer 有序抖动（1-bit）。")
+        return bayer_dithering(gray_img)
     kernel = DITHER_KERNELS.get(dither_method)
     if kernel is None:
         raise ValueError(
-            f"不支持的抖动方法: {dither_method}，可选: {list(DITHER_KERNELS) + ['binary_threshold']}"
+            f"不支持的抖动方法: {dither_method}，可选: {list(DITHER_KERNELS) + ['binary_threshold', 'bayer']}"
         )
     logger.info(f"应用 {dither_method} 抖动（1-bit）。")
     return error_diffusion(gray_img, _threshold, kernel)

@@ -5,7 +5,12 @@ import cv2
 import numpy as np
 from loguru import logger
 
-from .dithering_toolkit import DITHER_KERNELS, FLOYD_STEINBERG_KERNEL, error_diffusion
+from .dithering_toolkit import (
+    DITHER_KERNELS,
+    FLOYD_STEINBERG_KERNEL,
+    color_bayer_dithering,
+    error_diffusion,
+)
 
 
 def prepare_textures(src_dir: str, only: list[str] | None = None) -> str:
@@ -98,8 +103,13 @@ def color_atkinson_dithering(
     第二阶段：数字排线与光学混合
     method: "floyd_steinberg" (default, best for photos), "stucki" (smoothest), "atkinson" (graphics)
     """
-    kernel = DITHER_KERNELS.get(method, FLOYD_STEINBERG_KERNEL)
     logger.info(f"应用彩色 {method} 抖动 (计算光学混合)...")
+    if method == "bayer":
+        return color_bayer_dithering(
+            color_img,
+            lambda p: find_closest_palette_color(p, palette),
+        )
+    kernel = DITHER_KERNELS.get(method, FLOYD_STEINBERG_KERNEL)
     return error_diffusion(
         color_img,
         lambda p: find_closest_palette_color(p, palette),

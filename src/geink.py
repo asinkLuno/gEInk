@@ -173,9 +173,9 @@ def gridcut(input_path: str, rows: int, cols: int) -> None:
 )
 @click.option(
     "--dither",
-    type=click.Choice(["floyd_steinberg", "stucki", "atkinson"]),
+    type=click.Choice(["floyd_steinberg", "stucki", "atkinson", "jjn", "bayer"]),
     default="floyd_steinberg",
-    help="Dithering algorithm: floyd_steinberg (best for photos), stucki (smoothest), atkinson (graphics)",
+    help="Dithering algorithm: floyd_steinberg (best for photos), stucki (smoothest), atkinson (graphics), jjn (Jarvis-Judice-Ninke), bayer (ordered)",
 )
 def pointillize(
     input_path: str,
