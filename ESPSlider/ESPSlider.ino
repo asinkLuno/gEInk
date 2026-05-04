@@ -11,7 +11,7 @@
 #include "epd_minimal.h"
 #include "images.h"
 
-#define INTERVAL_MS 30000
+#define INTERVAL_MS 3000
 
 static int currentImage = 0;
 static unsigned long lastChange = 0;
