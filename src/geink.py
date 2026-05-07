@@ -317,6 +317,18 @@ def pointillize(
     default=False,
     help="Add retro terminal scanline effect (passed to renderer)",
 )
+@click.option(
+    "--sam-checkpoint",
+    type=click.Path(exists=True),
+    default=None,
+    help="Path to SAM .pth weights file; uses SAM boundary edges instead of Canny",
+)
+@click.option(
+    "--sam-model-type",
+    type=click.Choice(["vit_h", "vit_l", "vit_b"]),
+    default="vit_h",
+    help="SAM ViT variant (only used when --sam-checkpoint is given)",
+)
 def ascii_art(
     input_path: str,
     rows: int | None,
@@ -324,6 +336,8 @@ def ascii_art(
     render: bool,
     info_panel: bool,
     scanlines: bool,
+    sam_checkpoint: str | None,
+    sam_model_type: str,
 ) -> None:
     """
     Convert image to ASCII art and save as .txt.
@@ -355,6 +369,8 @@ def ascii_art(
         edge_threshold=edge_threshold,
         out_dir=out_dir,
         stem=input_file.stem,
+        sam_checkpoint=sam_checkpoint,
+        sam_model_type=sam_model_type,
     )
 
     txt_out = out_dir / f"{input_file.stem}_ascii.txt"

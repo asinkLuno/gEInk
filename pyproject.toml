@@ -25,6 +25,7 @@ dependencies = [
     "dotenv (>=0.9.9,<0.10.0)",
     "requests",
     "controlnet-aux",
+    "segment-anything",
 ]
 
 [project.scripts]
@@ -36,6 +37,9 @@ where = ["."]
 [[tool.uv.index]]
 url = "https://mirrors.aliyun.com/pypi/simple"
 default = true
+
+[tool.uv.sources]
+segment-anything = { git = "https://github.com/facebookresearch/segment-anything.git" }
 
 [dependency-groups]
 dev = [

@@ -8,6 +8,9 @@ import numpy as np
 CELL_H = 16
 CELL_W = 8  # half-width: exactly CELL_H / 2
 
+# Cached SAM model to avoid reloading weights on repeated calls.
+_sam_cache: dict = {}  # key: (checkpoint, model_type) → sam model
+
 
 def _is_line_art(img_rgb: np.ndarray) -> bool:
     """Return True if the image looks like line art (bright background, low saturation)."""
@@ -30,6 +33,56 @@ def _line_art_edges(gray: np.ndarray, target_h: int, target_w: int) -> np.ndarra
         )
 
     skel = skeletonize(binary > 0)
+    return skel.astype(np.uint8) * 255
+
+
+def _sam_edges(
+    img_rgb: np.ndarray,
+    target_h: int,
+    target_w: int,
+    checkpoint: str,
+    model_type: str = "vit_h",
+) -> np.ndarray:
+    """Derive a skeletonized edge map from SAM segmentation boundaries.
+
+    Runs SamAutomaticMaskGenerator on the image, computes each mask's
+    border via morphological dilation-erosion, unions them, then skeletonizes
+    to 1-pixel-wide strokes compatible with the existing cell classifier.
+    """
+    import torch
+    from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
+    from skimage.morphology import skeletonize
+
+    cache_key = (checkpoint, model_type)
+    if cache_key not in _sam_cache:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        sam = sam_model_registry[model_type](checkpoint=checkpoint)
+        sam.to(device=device)
+        _sam_cache[cache_key] = sam
+    sam = _sam_cache[cache_key]
+
+    mask_gen = SamAutomaticMaskGenerator(
+        sam,
+        pred_iou_thresh=0.86,
+        stability_score_thresh=0.92,
+        min_mask_region_area=50,
+    )
+    masks = mask_gen.generate(img_rgb)
+
+    h, w = img_rgb.shape[:2]
+    edge_map = np.zeros((h, w), dtype=np.uint8)
+    kernel = np.ones((3, 3), np.uint8)
+    for m in masks:
+        seg = m["segmentation"].astype(np.uint8) * 255
+        boundary = cv2.dilate(seg, kernel) - cv2.erode(seg, kernel)
+        edge_map = np.maximum(edge_map, boundary)
+
+    if edge_map.shape != (target_h, target_w):
+        edge_map = cv2.resize(
+            edge_map, (target_w, target_h), interpolation=cv2.INTER_NEAREST
+        )
+
+    skel = skeletonize(edge_map > 0)
     return skel.astype(np.uint8) * 255
 
 
@@ -217,6 +270,8 @@ def generate_ascii_art(
     edge_threshold: int = 20,
     out_dir: Optional[Path] = None,
     stem: Optional[str] = None,
+    sam_checkpoint: Optional[str] = None,
+    sam_model_type: str = "vit_h",
 ) -> list[str]:
     """Convert image to ASCII art and return rows as a list of strings.
 
@@ -224,9 +279,14 @@ def generate_ascii_art(
     resized so its pixel height equals num_rows * CELL_H, preserving aspect
     ratio, so columns scale proportionally.
 
+    Pass sam_checkpoint (path to .pth weights) to use SAM boundary edges
+    instead of Canny. sam_model_type selects the ViT variant ("vit_h",
+    "vit_l", "vit_b"). The SAM model is cached after first load.
+
     Pipeline:
     1. Resize to num_rows * CELL_H tall (preserve aspect ratio) if provided
-    2. Canny edge detection (bilateral pre-filter + Otsu thresholds)
+    2. Edge detection: SAM boundaries (if sam_checkpoint given), line-art
+       Otsu skeleton (if line art detected), or bilateral-Canny otherwise
     3. Per 8×16 cell, classify angle char via Sobel on edge map
     4. Write <stem>_ascii.txt to out_dir if both are given
     """
@@ -248,7 +308,15 @@ def generate_ascii_art(
     grid_rows = max(1, h // CELL_H)
     grid_cols = max(1, w // CELL_W)
 
-    if _is_line_art(img_rgb):
+    if sam_checkpoint is not None:
+        edges = _sam_edges(
+            img_rgb,
+            grid_rows * CELL_H,
+            grid_cols * CELL_W,
+            sam_checkpoint,
+            sam_model_type,
+        )
+    elif _is_line_art(img_rgb):
         edges = _line_art_edges(gray, grid_rows * CELL_H, grid_cols * CELL_W)
     else:
         edges = _canny_edges(gray, grid_rows * CELL_H, grid_cols * CELL_W)

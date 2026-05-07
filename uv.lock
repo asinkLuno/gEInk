@@ -357,6 +357,7 @@ dependencies = [
     { name = "opencv-python" },
     { name = "pillow" },
     { name = "requests" },
+    { name = "segment-anything" },
 ]
 
 [package.dev-dependencies]
@@ -385,6 +386,7 @@ requires-dist = [
     { name = "opencv-python" },
     { name = "pillow" },
     { name = "requests" },
+    { name = "segment-anything", git = "https://github.com/facebookresearch/segment-anything.git" },
 ]
 
 [package.metadata.requires-dev]
@@ -1787,6 +1789,11 @@ wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/11/2f/b29eafe4a3fbc3d6de9662b36e028d5f039e72d345e05c250e121a230dd4/scipy-1.17.1-cp314-cp314t-win_amd64.whl", hash = "sha256:eb092099205ef62cd1782b006658db09e2fed75bffcae7cc0d44052d8aa0f484" },
     { url = "https://mirrors.aliyun.com/pypi/packages/07/39/338d9219c4e87f3e708f18857ecd24d22a0c3094752393319553096b98af/scipy-1.17.1-cp314-cp314t-win_arm64.whl", hash = "sha256:200e1050faffacc162be6a486a984a0497866ec54149a01270adc8a59b7c7d21" },
 ]
+
+[[package]]
+name = "segment-anything"
+version = "1.0"
+source = { git = "https://github.com/facebookresearch/segment-anything.git#dca509fe793f601edb92606367a655c15ac00fdf" }
 
 [[package]]
 name = "setuptools"
