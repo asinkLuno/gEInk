@@ -52,23 +52,29 @@ def _canny_edges(gray: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
     return skel.astype(np.uint8) * 255
 
 
-# Edge angle [0°, 180°) → straight-line chars
-# Canonical angles: 0°=horizontal, 45°=\, 90°=vertical, 135°=/
-_EDGE_THRESHOLDS = [11.25, 67.5, 112.5, 168.75]
-_EDGE_CHARS = ["_", "\\", "|", "/", "-"]
+# direction index → chars at intensity 0..4
+# 0: horizontal, 1: vertical, 2: right diagonal (/), 3: left diagonal (\)
+_EDGE_CHARS_TABLE = [
+    [" ", "╌", "─", "━", "▀"],
+    [" ", "╎", "│", "┃", "▌"],
+    [" ", "⋰", "╱", "/", "◢"],
+    [" ", "⋱", "╲", "\\", "◣"],
+]
+# edge-pixel density (0-255 cell mean) thresholds → intensity 0-4
+_INTENSITY_BREAKS = [5.0, 25.0, 65.0, 130.0]
 
-_H_CHARS = frozenset("-_='.")
-_V_CHARS = frozenset("|()")
-_D1_CHARS = frozenset("\\")
-_D2_CHARS = frozenset("/")
-_ALL_EDGE = _H_CHARS | _V_CHARS | _D1_CHARS | _D2_CHARS | frozenset("+=")
+_H_CHARS = frozenset("╌─━▀")
+_V_CHARS = frozenset("╎│┃▌")
+_D2_CHARS = frozenset("⋰╱/◢")
+_D1_CHARS = frozenset("⋱╲\\◣")
+_ALL_EDGE = _H_CHARS | _V_CHARS | _D1_CHARS | _D2_CHARS
 
 
-def _angle_to_edge_char(edge_angle: float) -> str:
-    for i, t in enumerate(_EDGE_THRESHOLDS):
-        if edge_angle < t:
-            return _EDGE_CHARS[i]
-    return _EDGE_CHARS[-1]
+def _density_to_intensity(density: float) -> int:
+    for i, t in enumerate(_INTENSITY_BREAKS):
+        if density < t:
+            return i
+    return 4
 
 
 def _circular_mean_angle(angles_deg: np.ndarray) -> tuple[float, float]:
@@ -84,16 +90,14 @@ def _circular_mean_angle(angles_deg: np.ndarray) -> tuple[float, float]:
     return mean, consistency
 
 
-def _classify_edge_cell(cell_gx: np.ndarray, cell_gy: np.ndarray, cell_h: int) -> str:
-    """Map a cell's gradient data to one edge character.
+def _classify_edge_cell(
+    cell_gx: np.ndarray, cell_gy: np.ndarray, cell_h: int, edge_density: float
+) -> str:
+    """Map a cell's gradient data and edge density to one character from _EDGE_CHARS_TABLE."""
+    intensity = _density_to_intensity(edge_density)
+    if intensity == 0:
+        return " "
 
-    Priority order:
-    1. ( ) : curved vertical — each half is locally consistent but angles diverge
-    2. +   : intersection — low overall consistency AND not a clean curve
-    3. ' . : horizontal edge concentrated at cell top / bottom
-    4. =   : thick horizontal — edge spans most columns
-    5. _ \\ | / - : dominant-angle fallback
-    """
     mag = np.hypot(cell_gx, cell_gy)
     peak = float(mag.max())
     if peak == 0:
@@ -104,47 +108,18 @@ def _classify_edge_cell(cell_gx: np.ndarray, cell_gy: np.ndarray, cell_h: int) -
         return " "
 
     edge_angles = (np.degrees(np.arctan2(cell_gy, cell_gx)) + 90.0) % 180.0
-    mean_angle, consistency = _circular_mean_angle(edge_angles[mask])
+    mean_angle, _ = _circular_mean_angle(edge_angles[mask])
 
-    mid = cell_h // 2
-    top_mask = mask[:mid, :]
-    bot_mask = mask[mid:, :]
-    if top_mask.any() and bot_mask.any():
-        top_mean, top_cons = _circular_mean_angle(edge_angles[:mid, :][top_mask])
-        bot_mean, bot_cons = _circular_mean_angle(edge_angles[mid:, :][bot_mask])
-        if top_cons > 0.5 and bot_cons > 0.5:
-            diff = bot_mean - top_mean
-            if diff > 90:
-                diff -= 180
-            elif diff < -90:
-                diff += 180
-            if abs(diff) > 25:
-                pair = np.array([top_mean, bot_mean])
-                a2 = np.radians(pair * 2.0)
-                mid_angle = (
-                    float(np.degrees(np.arctan2(np.sin(a2).mean(), np.cos(a2).mean())))
-                    / 2.0
-                    % 180.0
-                )
-                if 45.0 < mid_angle < 135.0:
-                    return ")" if diff > 0 else "("
+    if mean_angle < 22.5 or mean_angle > 157.5:
+        direction = 0  # horizontal
+    elif mean_angle < 67.5:
+        direction = 3  # left diagonal \
+    elif mean_angle < 112.5:
+        direction = 1  # vertical
+    else:
+        direction = 2  # right diagonal /
 
-    if consistency < 0.4:
-        return "+"
-
-    is_horiz = mean_angle < 22.5 or mean_angle > 157.5
-    if is_horiz:
-        ys, xs = np.where(mask)
-        y_ratio = float(ys.mean()) / cell_h
-        if y_ratio < 0.35:
-            return "'"
-        if y_ratio > 0.65:
-            return "."
-        row_coverage = float(np.unique(ys).size) / cell_h
-        if row_coverage > 0.4:
-            return "="
-
-    return _angle_to_edge_char(mean_angle)
+    return _EDGE_CHARS_TABLE[direction][intensity]
 
 
 def _merge_edge_segments(rows: list[str], max_gap: int = 2) -> list[str]:
@@ -293,10 +268,8 @@ def generate_ascii_art(
         row_chars: list[str] = []
         for col in range(grid_cols):
             x0, x1 = col * CELL_W, (col + 1) * CELL_W
-            if edges[y0:y1, x0:x1].mean() > edge_threshold:
-                char = _classify_edge_cell(gx[y0:y1, x0:x1], gy[y0:y1, x0:x1], CELL_H)
-            else:
-                char = " "
+            density = float(edges[y0:y1, x0:x1].mean())
+            char = _classify_edge_cell(gx[y0:y1, x0:x1], gy[y0:y1, x0:x1], CELL_H, density)
             row_chars.append(char)
         rows.append("".join(row_chars))
 
