@@ -43,14 +43,13 @@ def _sam_edges(
     checkpoint: str,
     model_type: str = "vit_h",
 ) -> np.ndarray:
-    """Derive a skeletonized edge map from SAM segmentation boundaries.
+    """Derive a skeletonized edge map from the main SAM object boundary.
 
-    Runs SamAutomaticMaskGenerator on the image, computes each mask's
-    border via morphological dilation-erosion, unions them, then skeletonizes
-    to 1-pixel-wide strokes compatible with the existing cell classifier.
+    Uses SamPredictor with a center-point prompt to find the primary subject,
+    then skeletonizes its boundary to 1-pixel-wide strokes.
     """
     import torch
-    from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
+    from segment_anything import SamPredictor, sam_model_registry
     from skimage.morphology import skeletonize
 
     cache_key = (checkpoint, model_type)
@@ -61,21 +60,21 @@ def _sam_edges(
         _sam_cache[cache_key] = sam
     sam = _sam_cache[cache_key]
 
-    mask_gen = SamAutomaticMaskGenerator(
-        sam,
-        pred_iou_thresh=0.86,
-        stability_score_thresh=0.92,
-        min_mask_region_area=50,
-    )
-    masks = mask_gen.generate(img_rgb)
-
     h, w = img_rgb.shape[:2]
-    edge_map = np.zeros((h, w), dtype=np.uint8)
+    predictor = SamPredictor(sam)
+    predictor.set_image(img_rgb)
+
+    # Center-point prompt: ask SAM "what is the main object here?"
+    masks_out, scores, _ = predictor.predict(
+        point_coords=np.array([[w // 2, h // 2]]),
+        point_labels=np.array([1]),
+        multimask_output=True,
+    )
+    mask = masks_out[int(scores.argmax())]
+
     kernel = np.ones((3, 3), np.uint8)
-    for m in masks:
-        seg = m["segmentation"].astype(np.uint8) * 255
-        boundary = cv2.dilate(seg, kernel) - cv2.erode(seg, kernel)
-        edge_map = np.maximum(edge_map, boundary)
+    seg = mask.astype(np.uint8) * 255
+    edge_map = cv2.dilate(seg, kernel) - cv2.erode(seg, kernel)
 
     if edge_map.shape != (target_h, target_w):
         edge_map = cv2.resize(
@@ -267,7 +266,6 @@ def _merge_edge_segments(rows: list[str], max_gap: int = 2) -> list[str]:
 def generate_ascii_art(
     img_bgr: np.ndarray,
     num_rows: Optional[int] = None,
-    edge_threshold: int = 20,
     out_dir: Optional[Path] = None,
     stem: Optional[str] = None,
     sam_checkpoint: Optional[str] = None,
@@ -299,12 +297,8 @@ def generate_ascii_art(
         img_bgr = cv2.resize(img_bgr, (target_w, target_h), interpolation=interp)
 
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-    if out_dir is not None:
-        cv2.imwrite(str(out_dir / f"{stem}_gray.png"), gray)
-
-    h, w = gray.shape
+    h, w = img_bgr.shape[:2]
     grid_rows = max(1, h // CELL_H)
     grid_cols = max(1, w // CELL_W)
 
@@ -316,10 +310,14 @@ def generate_ascii_art(
             sam_checkpoint,
             sam_model_type,
         )
-    elif _is_line_art(img_rgb):
-        edges = _line_art_edges(gray, grid_rows * CELL_H, grid_cols * CELL_W)
     else:
-        edges = _canny_edges(gray, grid_rows * CELL_H, grid_cols * CELL_W)
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        if out_dir is not None:
+            cv2.imwrite(str(out_dir / f"{stem}_gray.png"), gray)
+        if _is_line_art(img_rgb):
+            edges = _line_art_edges(gray, grid_rows * CELL_H, grid_cols * CELL_W)
+        else:
+            edges = _canny_edges(gray, grid_rows * CELL_H, grid_cols * CELL_W)
 
     if out_dir is not None:
         cv2.imwrite(str(out_dir / f"{stem}_edges.png"), edges)

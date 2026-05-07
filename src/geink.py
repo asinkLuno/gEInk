@@ -293,13 +293,6 @@ def pointillize(
     help="Number of ASCII lines in the output (controls detail; proportional columns are computed automatically)",
 )
 @click.option(
-    "--edge-threshold",
-    "-t",
-    type=int,
-    default=20,
-    help="Trigger threshold for edge detection (lower = more lines)",
-)
-@click.option(
     "--render",
     is_flag=True,
     default=False,
@@ -332,7 +325,6 @@ def pointillize(
 def ascii_art(
     input_path: str,
     rows: int | None,
-    edge_threshold: int,
     render: bool,
     info_panel: bool,
     scanlines: bool,
@@ -366,7 +358,6 @@ def ascii_art(
     generate_ascii_art(
         img,
         num_rows=rows,
-        edge_threshold=edge_threshold,
         out_dir=out_dir,
         stem=input_file.stem,
         sam_checkpoint=sam_checkpoint,
